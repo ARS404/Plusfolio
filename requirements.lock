@@ -1,0 +1,13 @@
+asgiref==3.12.1
+cffi==2.1.1
+cryptography==50.0.2
+Django==5.2.18
+djangorestframework==3.16.1
+et_xmlfile==2.0.0
+openpyxl==3.1.5
+psycopg==3.3.6
+psycopg-binary==3.3.6
+pycparser==3.11
+sqlparse==0.6.0
+numpy==2.5.4
+pgvector==0.5.1

@@ -1,0 +1,28 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage{fontspec}
+\setmainfont{DejaVuSerif.ttf}[BoldFont=DejaVuSerif-Bold.ttf,ItalicFont=DejaVuSerif-Italic.ttf,BoldItalicFont=DejaVuSerif-BoldItalic.ttf]
+\setsansfont{DejaVuSans.ttf}[BoldFont=DejaVuSans-Bold.ttf]
+\usepackage{polyglossia}
+\setdefaultlanguage{russian}
+\usepackage{amsmath,amssymb,amsthm,enumitem,tikz}
+\usetikzlibrary{calc,angles,quotes,intersections,positioning,arrows.meta,decorations.markings,shapes.geometric,patterns,babel}
+\usepackage[margin=22mm,headheight=14pt]{geometry}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[L]{\small Plusfolio}
+\fancyfoot[R]{\small\thepage}
+\renewcommand{\headrulewidth}{0pt}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlength{\emergencystretch}{3em}
+\begin{document}
+{\small\sffamily \PlusfolioCircle\hfill \PlusfolioDate}\par
+\vspace{7mm}
+{\Large\bfseries \PlusfolioTitle}\par
+{\small\sffamily Листок № \PlusfolioNumber}\par
+\vspace{3mm}
+\PlusfolioDescription\par
+\input{problems.tex}
+\input{solutions.tex}
+\end{document}

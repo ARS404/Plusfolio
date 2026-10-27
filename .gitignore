@@ -218,3 +218,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Plusfolio local runtime and frontend
+.local/
+frontend/node_modules/
+frontend/dist/
+*.tsbuildinfo
+.DS_Store

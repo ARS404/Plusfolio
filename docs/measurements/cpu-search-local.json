@@ -1,0 +1,62 @@
+{
+  "model": "e5-small-int8-614241f622f5-chunk448-v1",
+  "hardware": "arm64",
+  "problems": 509,
+  "indexed_documents": 1018,
+  "exact_top1": "20/20",
+  "solution_in_top20": "10/10",
+  "paraphrases": [
+    {
+      "source_id": "87981",
+      "hybrid_rank": 2,
+      "vector_document_rank": 3,
+      "milliseconds": 92.9
+    },
+    {
+      "source_id": "56540",
+      "hybrid_rank": 2,
+      "vector_document_rank": 3,
+      "milliseconds": 80.9
+    },
+    {
+      "source_id": "66038",
+      "hybrid_rank": 1,
+      "vector_document_rank": 2,
+      "milliseconds": 78.2
+    },
+    {
+      "source_id": "21984",
+      "hybrid_rank": 1,
+      "vector_document_rank": 1,
+      "milliseconds": 77.4
+    },
+    {
+      "source_id": "88018",
+      "hybrid_rank": 2,
+      "vector_document_rank": 2,
+      "milliseconds": 77.8
+    },
+    {
+      "source_id": "61455",
+      "hybrid_rank": 1,
+      "vector_document_rank": 1,
+      "milliseconds": 77.5
+    }
+  ],
+  "api_median_ms": 78.0,
+  "api_max_ms": 92.9,
+  "corpus_inference": {
+    "documents": 1018,
+    "seconds": 29.22
+  },
+  "model_health": {
+    "ready": true,
+    "model": "e5-small-int8-614241f622f5-chunk448-v1",
+    "dimensions": 384,
+    "provider": "CPUExecutionProvider",
+    "peak_rss_mb": 797.4
+  },
+  "limitations": "Small manually authored smoke set; local CPU, warm model, SQLite, single sequential caller. Not a production SLA or unbiased recall benchmark.",
+  "measured_on": "2026-10-27",
+  "embedding_threads": 2
+}

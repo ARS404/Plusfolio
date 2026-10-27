@@ -1,0 +1,7 @@
+Django>=5.2.8,<5.3
+djangorestframework>=3.16,<3.17
+cryptography>=46
+psycopg[binary]>=3.2,<4
+openpyxl>=3.1.5,<3.2
+pgvector==0.5.1
+numpy>=2.2,<3

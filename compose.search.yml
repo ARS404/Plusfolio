@@ -1,0 +1,18 @@
+services:
+  embeddings:
+    build:
+      context: .
+      dockerfile: embeddings/Dockerfile
+    image: plusfolio-embeddings:e5-small-int8-v1
+    ports:
+      - "127.0.0.1:8011:8011"
+    environment:
+      EMBEDDING_THREADS: "2"
+    cpus: 2
+    mem_limit: 2g
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped

@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Plusfolio problems.ru topic catalog",
+  "type": "object",
+  "required": [
+    "metadata",
+    "source_nodes",
+    "source_edges",
+    "normalized_nodes",
+    "conflicts",
+    "fetch_failures"
+  ],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "complete",
+        "generated_at",
+        "source_root_id",
+        "unexpanded_branch_source_ids"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "generated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source_root_id": {
+          "type": "string"
+        },
+        "unexpanded_branch_source_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "source_nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source_id",
+          "parent_source_id",
+          "name",
+          "source_url",
+          "sort_order",
+          "has_children",
+          "children_complete"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "parent_source_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "has_children": {
+            "type": "boolean"
+          },
+          "children_complete": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "source_edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "parent_source_id",
+          "child_source_id",
+          "sort_order"
+        ],
+        "properties": {
+          "parent_source_id": {
+            "type": "string"
+          },
+          "child_source_id": {
+            "type": "string"
+          },
+          "sort_order": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "normalized_nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "parent_id",
+          "name",
+          "source_id",
+          "source_name",
+          "source_url",
+          "is_other",
+          "is_system",
+          "sort_order",
+          "source_children_complete"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parent_source_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "is_other": {
+            "type": "boolean"
+          },
+          "is_system": {
+            "type": "boolean"
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "source_children_complete": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "fetch_failures": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}
