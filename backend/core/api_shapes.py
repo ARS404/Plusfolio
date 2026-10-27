@@ -178,6 +178,7 @@ SCHEMAS={
  'Invitation':record('Приглашение',{'id':UUID,'public_id':text('INV-ID.'),'email':EMAIL,
     'role':text('Приглашаемая роль.',enum=['student','teacher','analyst','admin']),
     'circle':nullable(text(),'Название кружка; null для области по тегам или администратора.'),
+    'delivery':nullable(record('Отправка письма',{'state':text(enum=['queued','retry','sent','failed','cancelled']),'attempts':number(),'error_code':text('Безопасный код ошибки, без SMTP-ответов или адресов.'),'sent_at':nullable(DATETIME)})),
     'circle_id':nullable(UUID),'state':text('Состояние приглашения.',enum=['pending','accepted','revoked','expired']),
     'expires_at':DATETIME,'created_at':DATETIME},['id','public_id','email','role','circle','circle_id','state','expires_at','created_at']),
  'InvitationCreated':record('Созданные приглашения',{'id':UUID,'ids':array(UUID,'Все созданные приглашения. Для каждого кружка отдельная ссылка.')},['id','ids']),

@@ -11,8 +11,8 @@ from .documents import TEMPLATE, CompilerUnavailable
 
 SOURCE_FILES = [
     'backend/core/__init__.py', 'backend/core/documents.py', 'backend/core/tex_worker.py',
-    'backend/core/tex_templates/math-a4-v1.tex', 'backend/core/tex_toolchain.py',
-    'scripts/setup_tex.py', 'scripts/preview_tex.py', 'requirements-tex.lock',
+    'backend/core/tex_templates/math-a4-v1.tex', 'backend/core/tex_toolchain.py', 'backend/core/tex_remote.py', 'scripts/tex_service.py',
+    'scripts/setup_tex.py', 'scripts/download_asset.py', 'scripts/preview_tex.py', 'requirements-tex.lock',
     'docs/tex-preflight.md',
 ]
 

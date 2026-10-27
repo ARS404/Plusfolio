@@ -15,7 +15,10 @@ def frontend(request,path=''):
     import mimetypes
     return FileResponse(target.open('rb'),content_type=mimetypes.guess_type(target.name)[0] or 'application/octet-stream')
 
+from core.health import ready
+
 urlpatterns=[
+    path('healthz',ready),
     path('api/tex/toolchain',tex_api.toolchain),
     path('api/tex/toolchain/archive',tex_api.archive),
     path('api/problem-search',problem_search),

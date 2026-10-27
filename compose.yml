@@ -1,0 +1,229 @@
+name: ${COMPOSE_PROJECT_NAME:-plusfolio}
+x-app: &app
+  image: ${PLUSFOLIO_APP_IMAGE:-plusfolio-app:local}
+  pull_policy: never
+  init: true
+  restart: unless-stopped
+  user: "65532:65532"
+  read_only: true
+  tmpfs:
+    - /tmp:size=256m,mode=1777
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  environment: &environment
+    PLUSFOLIO_DEMO: "0"
+    PLUSFOLIO_TRUST_PROXY_CLIENT_IP: "1"
+    PLUSFOLIO_INSTANCE_ID: ${INSTANCE_ID:?Run server.py init}
+    PLUSFOLIO_PUBLIC_URL: ${PUBLIC_URL:?Run scripts/server.py init}
+    DJANGO_ALLOWED_HOSTS: ${PUBLIC_HOST},127.0.0.1,localhost
+    DJANGO_SECRET_KEY_FILE: /run/secrets/app_key
+    POSTGRES_HOST: db
+    POSTGRES_DB: plusfolio
+    POSTGRES_USER: plusfolio
+    POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    REDIS_URL: redis://redis:6379/0
+    PLUSFOLIO_EMBEDDING_URL: http://embeddings:8011
+    PLUSFOLIO_TEX_SOCKET: /run/plusfolio-tex/compiler.sock
+    SMTP_HOST: ${SMTP_HOST:?Configure invitation SMTP}
+    SMTP_PORT: ${SMTP_PORT:-587}
+    SMTP_USER: ${SMTP_USER:-}
+    SMTP_PASSWORD_FILE: /run/secrets/smtp_password
+    SMTP_FROM: ${SMTP_FROM:?Configure sender}
+    SMTP_TLS: ${SMTP_TLS:-1}
+    SMTP_SSL: ${SMTP_SSL:-0}
+  secrets: [app_key,db_password,smtp_password]
+  volumes: &app-volumes
+    - runtime:/app/.local
+    - tex-socket:/run/plusfolio-tex
+  pids_limit: 128
+  mem_limit: 1g
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+
+services:
+  db:
+    image: pgvector/pgvector:0.8.7-pg17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password,db_password]
+    volumes:
+      - database:/var/lib/postgresql/data
+      - ./deploy/postgres-init.sh:/docker-entrypoint-initdb.d/10-plusfolio.sh:ro
+    networks: [backend]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 768m
+    shm_size: 128m
+  redis:
+    image: redis:8.8-alpine
+    command: [redis-server,--maxmemory,128mb,--maxmemory-policy,allkeys-lru,--save,"",--appendonly,"no"]
+    restart: unless-stopped
+    networks: [backend]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD,redis-cli,ping]
+      interval: 5s
+      retries: 20
+    mem_limit: 192m
+  embeddings:
+    build:
+      context: .
+      dockerfile: embeddings/Dockerfile
+    image: ${PLUSFOLIO_EMBEDDINGS_IMAGE:-plusfolio-embeddings:local}
+    restart: unless-stopped
+    environment: {EMBEDDING_THREADS: "2"}
+    volumes: [model:/model:ro]
+    networks: [backend]
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 2
+    mem_limit: 2g
+  tex:
+    <<: *app
+    image: ${PLUSFOLIO_TEX_IMAGE:-plusfolio-tex:local}
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      target: compiler
+    command: [python,scripts/tex_service.py]
+    environment:
+      PLUSFOLIO_ISOLATED_TEX: "1"
+      PLUSFOLIO_TEX_SOCKET: /run/plusfolio-tex/compiler.sock
+    secrets: []
+    volumes: [tex-socket:/run/plusfolio-tex]
+    network_mode: none
+    mem_limit: 1g
+    pids_limit: 48
+    healthcheck:
+      test: [CMD,python,-c,"import socket,json; s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(2); s.connect('/run/plusfolio-tex/compiler.sock'); p=json.dumps({'health':True}).encode(); s.sendall(str(len(p)).encode()+b'\\n'+p); f=s.makefile('rb'); n=int(f.readline()); assert json.loads(f.read(n))['ok']"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+  initialize:
+    <<: *app
+    networks: [backend]
+    restart: "no"
+    command: [sh,-c,"python backend/manage.py migrate --noinput && python backend/manage.py bootstrap_server && python backend/manage.py check --deploy --fail-level WARNING"]
+    environment:
+      <<: *environment
+      BOOTSTRAP_ADMIN_EMAIL: ${ADMIN_EMAIL:?Configure first admin}
+      BOOTSTRAP_ADMIN_NAME: ${ADMIN_NAME:-Администратор}
+      BOOTSTRAP_ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+    secrets: [app_key,db_password,smtp_password,admin_password]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+  web:
+    <<: *app
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      target: application
+    networks: [backend,frontend]
+    depends_on:
+      initialize: {condition: service_completed_successfully}
+      embeddings: {condition: service_healthy}
+      tex: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD,python,scripts/server_probe.py,web]
+      interval: 10s
+      timeout: 8s
+      retries: 20
+      start_period: 30s
+  indexer:
+    <<: *app
+    networks: [backend]
+    healthcheck:
+      test: [CMD,python,scripts/server_probe.py,index]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    command: [python,-u,backend/manage.py,index_problem_search,--watch]
+    depends_on:
+      initialize: {condition: service_completed_successfully}
+      embeddings: {condition: service_healthy}
+  mail:
+    <<: *app
+    command: [python,-u,backend/manage.py,deliver_invitations,--watch]
+    networks: [backend,frontend]
+    depends_on:
+      initialize: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD,python,scripts/server_probe.py,mail]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+  backup:
+    <<: *app
+    networks: [backend]
+    healthcheck:
+      test: [CMD,python,-c,"import os,time; assert time.time()-float(open('/backups/last-success').read())<int(os.environ.get('BACKUP_INTERVAL','86400'))+180"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 5
+    user: "65532:65532"
+    secrets: [app_key,postgres_password,db_password,smtp_password,admin_password]
+    command: [python,-u,scripts/server_backup.py,--watch]
+    environment:
+      <<: *environment
+      BACKUP_RECIPIENT: ${BACKUP_RECIPIENT:-}
+      BACKUP_INTERVAL: ${BACKUP_INTERVAL:-86400}
+    volumes:
+      - runtime:/app/.local:ro
+      - model:/model:ro
+      - backups:/backups
+      - ./.deploy/env:/deployment/env:ro
+    depends_on:
+      initialize: {condition: service_completed_successfully}
+    mem_limit: 1g
+  proxy:
+    image: caddy:2.11.7-alpine
+    restart: unless-stopped
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST}
+      ACME_EMAIL: ${ADMIN_EMAIL}
+    ports:
+      - "${BIND_ADDRESS:-0.0.0.0}:${HTTP_PORT:-80}:80"
+      - "${BIND_ADDRESS:-0.0.0.0}:${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - certificates:/data
+      - proxy-config:/config
+    networks: [frontend]
+    depends_on:
+      web: {condition: service_healthy}
+    mem_limit: 128m
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+
+networks:
+  backend: {internal: true}
+  frontend: {}
+volumes:
+  database: {}
+  runtime: {}
+  model: {}
+  tex-socket: {}
+  certificates: {}
+  proxy-config: {}
+  backups: {}
+secrets:
+  app_key: {file: ./.deploy/secrets/app_key}
+  postgres_password: {file: ./.deploy/secrets/postgres_password}
+  db_password: {file: ./.deploy/secrets/db_password}
+  smtp_password: {file: ./.deploy/secrets/smtp_password}
+  admin_password: {file: ./.deploy/secrets/admin_password}

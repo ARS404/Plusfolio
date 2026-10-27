@@ -2,3 +2,7 @@
 !embeddings/
 !embeddings/**
 embeddings/__pycache__/
+
+!scripts/
+!scripts/download_asset.py
+!scripts/install_locked.py

@@ -326,6 +326,13 @@ class EmailOutbox(models.Model):
     encrypted_payload=models.TextField()
     state=models.CharField(max_length=16,default='queued')
     created_at=models.DateTimeField(auto_now_add=True)
+    attempts=models.PositiveSmallIntegerField(default=0)
+    next_attempt_at=models.DateTimeField(null=True)
+    locked_until=models.DateTimeField(null=True)
+    sent_at=models.DateTimeField(null=True)
+    error_code=models.CharField(max_length=64,blank=True)
+    class Meta:
+        indexes=[models.Index(fields=['next_attempt_at','id'],condition=models.Q(state__in=['queued','retry']),name='outbox_pending_retry')]
 
 @receiver(m2m_changed)
 def protect_material_links(sender,instance,action,reverse,model,pk_set,**kwargs):

@@ -1,0 +1,29 @@
+name: Verify server installation
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  server:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build a clean Linux server and exercise HTTPS, SMTP, CPU search, TeX and backups
+        run: python3 deploy/check_server.py --keep
+      - name: Verify download integrity and immutable dependency locks
+        run: docker compose --env-file .deploy/env -f compose.yml run --rm --no-deps web python deploy/test_downloads.py
+      - name: Run backend regression suite in a disposable SQLite test database
+        run: >-
+          docker compose --env-file .deploy/env -f compose.yml -f deploy/compose.test.yml run --rm --no-deps
+          -e PLUSFOLIO_DEMO=1 -e POSTGRES_HOST= -e REDIS_URL= web
+          python backend/manage.py test core --noinput
+      - name: Capture service diagnostics
+        if: failure()
+        run: docker compose --env-file .deploy/env -f compose.yml -f deploy/compose.test.yml logs --tail 100
+      - name: Remove disposable test volumes
+        if: always()
+        run: docker compose --env-file .deploy/env -f compose.yml -f deploy/compose.test.yml down --volumes --remove-orphans

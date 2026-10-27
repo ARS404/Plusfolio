@@ -5,6 +5,10 @@ import json
 import os
 from pathlib import Path
 import urllib.request
+import sys
+helpers=Path(__file__).resolve().parents[1]/'scripts'
+if helpers.is_dir():sys.path.insert(0,str(helpers))
+from download_asset import download
 
 LOCK = json.loads(Path(__file__).with_name('model.lock.json').read_text())
 MODEL_ID = 'e5-small-int8-' + LOCK['revision'][:12] + '-chunk448-v1'
@@ -21,9 +25,7 @@ def prepare(directory):
         url = f"https://huggingface.co/{LOCK['repository']}/resolve/{LOCK['revision']}/{remote}"
         print('Downloading', remote, flush=True)
         try:
-            with urllib.request.urlopen(url, timeout=120) as source, partial.open('wb') as output:
-                while chunk := source.read(1024 * 1024):
-                    output.write(chunk)
+            download(url,partial,digest,workers=int(os.environ.get('MODEL_DOWNLOAD_THREADS','12')))
             with partial.open('rb') as downloaded:
                 if hashlib.file_digest(downloaded, 'sha256').hexdigest() != digest:
                     raise ValueError('Model checksum mismatch')

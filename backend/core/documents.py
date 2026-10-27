@@ -103,6 +103,13 @@ def render_pdf(project,diagnostics=None):
     if target.exists():
         if diagnostics is not None:diagnostics.update(cache_hit=True,warnings=[])
         return target.read_bytes()
+    if getattr(settings,'TEX_SOCKET',''):
+        from .tex_remote import compile_project
+        pdf=compile_project(settings.TEX_SOCKET,project,diagnostics)
+        from uuid import uuid4
+        temporary=target.with_suffix('.'+str(uuid4())+'.tmp')
+        temporary.write_bytes(pdf);os.replace(temporary,target)
+        return pdf
     if not compiler:raise CompilerUnavailable()
     if not WORKERS.acquire(blocking=False):raise CompilerUnavailable('Сборка PDF занята. Повторите через несколько секунд.')
     try:
@@ -122,10 +129,12 @@ def render_pdf(project,diagnostics=None):
                 profile=work/'compiler.sb';profile.write_text(rules)
                 command=['/usr/bin/sandbox-exec','-f',str(profile),compiler,'-X','compile','--untrusted','--only-cached','--keep-logs','main.tex']
             elif sys.platform.startswith('linux') and shutil.which('bwrap'):
+                (work/'passwd').write_text(f'plusfolio:x:{os.getuid()}:{os.getgid()}:Plusfolio:/work:/sbin/nologin\n')
+                (work/'group').write_text(f'plusfolio:x:{os.getgid()}:\n')
                 command=[shutil.which('bwrap'),'--unshare-all','--die-with-parent','--new-session','--dir','/usr']
                 for path in ['/usr/lib','/usr/share/fonts','/usr/share/fontconfig','/lib','/lib64','/etc/fonts']:
                     if Path(path).exists():command+=['--ro-bind',path,path]
-                command+=['--ro-bind',compiler,'/compiler','--ro-bind',env['TECTONIC_CACHE_DIR'],'/tex-cache','--bind',directory,'/work','--tmpfs','/tmp','--proc','/proc','--dev','/dev','--chdir','/work','--setenv','TECTONIC_CACHE_DIR','/tex-cache','--setenv','XDG_CONFIG_HOME','/work/config','/compiler','-X','compile','--untrusted','--only-cached','--keep-logs','main.tex']
+                command+=['--ro-bind',str(work/'passwd'),'/etc/passwd','--ro-bind',str(work/'group'),'/etc/group','--ro-bind',compiler,'/compiler','--ro-bind',env['TECTONIC_CACHE_DIR'],'/tex-cache','--bind',directory,'/work','--tmpfs','/tmp','--proc','/proc','--dev','/dev','--chdir','/work','--setenv','TECTONIC_CACHE_DIR','/tex-cache','--setenv','XDG_CONFIG_HOME','/work/config','--setenv','XDG_CACHE_HOME','/work/cache','--setenv','XDG_DATA_HOME','/work/data','/compiler','-X','compile','--untrusted','--only-cached','--keep-logs','main.tex']
             else:raise CompilerUnavailable('Для изоляции TeX нужен sandbox-exec (macOS) или bubblewrap (Linux).')
             process=subprocess.Popen([sys.executable,str(ROOT/'tex_worker.py'),*command],cwd=directory,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,start_new_session=True)
             try:output,_=process.communicate(timeout=20)

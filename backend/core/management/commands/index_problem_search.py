@@ -1,6 +1,7 @@
 import time
 from django.core.management.base import BaseCommand, CommandError
 from django.db import close_old_connections
+from django.core.cache import cache
 from core.search import reconcile_missing, index_batch, EmbeddingUnavailable, MODEL_ID
 from core.models import ProblemSearchDocument, CatalogueSearchDocument
 from core import catalogue_search
@@ -19,6 +20,7 @@ class Command(BaseCommand):
         rebuild=options['rebuild']
         while True:
             close_old_connections()
+            cache.set('worker:index',time.time(),60)
             reconcile_missing(rebuild)
             catalogue_search.reconcile(rebuild)
             rebuild=False

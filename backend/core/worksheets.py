@@ -45,7 +45,7 @@ def fields(revision):
 
 @transaction.atomic
 def update(user,pk,data):
-    document=WorksheetDocument.objects.select_for_update().select_related('current_revision').filter(pk=pk).first()
+    document=WorksheetDocument.objects.select_for_update(of=('self',)).select_related('current_revision').filter(pk=pk).first()
     if not document:raise s.NotFound('Листок недоступен.')
     s.require(document.author_id==user.pk,'Редактировать листок может только его автор.')
     base=document.current_revision
@@ -71,7 +71,7 @@ def copy(user,revision_id):
 @transaction.atomic
 def publish(user,pk,data):
     s.require(s.admin(user),'Публиковать листки для всех может только администратор.')
-    document=WorksheetDocument.objects.select_for_update().select_related('current_revision').get(pk=pk)
+    document=WorksheetDocument.objects.select_for_update(of=('self',)).select_related('current_revision').get(pk=pk)
     current=document.current_revision
     if current.archived:raise ValidationError('Листок в архиве.')
     if type(data.get('version')) is not int:raise ValidationError('Передайте номер публикуемой версии.')

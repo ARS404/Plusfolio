@@ -63,9 +63,11 @@ def account_password(request):
 def auth_login(request):
     from django.core.cache import cache
     key='login:'+request.META.get('REMOTE_ADDR','unknown')
-    attempts=cache.get(key,0)
+    if cache.add(key,1,300):attempts=1
+    else:
+        try:attempts=cache.incr(key)
+        except ValueError:cache.set(key,1,300);attempts=1
     if attempts>40:return JsonResponse({'detail':'Слишком много попыток. Повторите позже.'},status=429)
-    cache.set(key,attempts+1,300)
     try:data=json.loads(request.body)
     except (ValueError,UnicodeError):return JsonResponse({'detail':'Некорректный запрос.'},status=400)
     user=authenticate(request,email=str(data.get('email','')).strip().lower(),password=data.get('password',''))
@@ -389,7 +391,9 @@ def invitations(request):
             objects=[s.invite(request.user,str(d.get('email','')),role,circle,d.get('tags')) for circle in selected]
         return Response({'id':str(objects[0].pk),'ids':[str(obj.pk) for obj in objects]},status=201)
     qs=Invitation.objects.all() if s.admin(request.user) else Invitation.objects.filter(created_by=request.user)
-    return Response([{'id':str(i.pk),'public_id':public_id('invitation',i.number_id),'email':i.email,'role':i.role,'circle':i.circle.name if i.circle else None,'circle_id':str(i.circle_id) if i.circle_id else None,'state':'expired' if i.state=='pending' and i.expires_at<=timezone.now() else i.state,'expires_at':i.expires_at.isoformat(),'created_at':i.created_at.isoformat()} for i in search_entities(qs,request.query_params.get('q',''),'invitation',text_fields=('email','circle__name')).select_related('circle').order_by('-created_at')[:100]])
+    from django.db.models import Prefetch
+    qs=qs.prefetch_related(Prefetch('letters',queryset=EmailOutbox.objects.order_by('-pk'),to_attr='_delivery'))
+    return Response([{'id':str(i.pk),'public_id':public_id('invitation',i.number_id),'email':i.email,'role':i.role,'circle':i.circle.name if i.circle else None,'circle_id':str(i.circle_id) if i.circle_id else None,'state':'expired' if i.state=='pending' and i.expires_at<=timezone.now() else i.state,'delivery':{'state':i._delivery[0].state,'attempts':i._delivery[0].attempts,'error_code':i._delivery[0].error_code,'sent_at':i._delivery[0].sent_at.isoformat() if i._delivery[0].sent_at else None} if i._delivery else None,'expires_at':i.expires_at.isoformat(),'created_at':i.created_at.isoformat()} for i in search_entities(qs,request.query_params.get('q',''),'invitation',text_fields=('email','circle__name')).select_related('circle').order_by('-created_at')[:100]])
 
 @api_view(['DELETE'])
 def invitation_detail(request,pk):

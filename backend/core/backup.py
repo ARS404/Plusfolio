@@ -7,7 +7,7 @@ from cryptography.fernet import Fernet
 from django.conf import settings
 from django.db import connection
 
-EXCLUDE={'.git','.local','node_modules','__pycache__','.venv'}
+EXCLUDE={'.git','.deploy','.local','node_modules','__pycache__','.venv'}
 CHUNK_SIZE=1024*1024
 
 def source_files():

@@ -2,6 +2,7 @@
 """Install pinned official Tectonic and warm trusted template/TikZ resources, never user data."""
 import hashlib,io,json,os,platform,subprocess,sys,tarfile,tempfile,urllib.request
 from pathlib import Path
+from download_asset import download
 ROOT=Path(__file__).resolve().parents[1]
 VERSION='0.17.0'
 ASSETS={
@@ -16,7 +17,8 @@ def main():
  if not binary.exists():
   url=f'https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%40{VERSION}/tectonic-{VERSION}-{target}.tar.gz'
   print('Downloading official Tectonic '+VERSION,flush=True)
-  with urllib.request.urlopen(url,timeout=60) as response:payload=response.read()
+  with tempfile.TemporaryDirectory(prefix='tectonic-download-') as directory:
+   asset=Path(directory)/'tectonic.tar.gz';download(url,asset,digest,workers=8);payload=asset.read_bytes()
   if hashlib.sha256(payload).hexdigest()!=digest:raise RuntimeError('Tectonic checksum mismatch')
   with tarfile.open(fileobj=io.BytesIO(payload),mode='r:gz') as archive:
    members=[member for member in archive.getmembers() if member.isfile() and Path(member.name).name=='tectonic']
