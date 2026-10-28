@@ -9,7 +9,7 @@ from django.test import TestCase,TransactionTestCase,override_settings
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 from . import services as s
-from .models import User, Circle, CircleTeacher, Enrollment, Problem, Worksheet, WorksheetItem, WorksheetIssue, WorksheetDocument, Assignment, Topic, Tag
+from .models import User, Circle, CircleTeacher, Enrollment, Problem, Worksheet, WorksheetItem, WorksheetIssue, WorksheetDocument, Assignment, Topic, Tag, Solve, Discussion
 
 
 @override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
@@ -69,6 +69,43 @@ class QueryBudgetTests(TestCase):
         self.assertEqual(len(result['blocks']),40)
         self.assertTrue(all(len(block['problems'])==80 for block in result['blocks']))
         self.assertTrue(all('solution' not in problem for block in result['blocks'] for problem in block['problems']))
+
+    def test_large_report_cohorts_preserve_global_counts_and_full_sheet_completion(self):
+        circle=self.circles[0]
+        peer=User.objects.create_user('report-peer@example.test','unused',name='Тестовый Второй Ученик',roles=['student'])
+        s.profiles(peer)
+        issues=list(circle.issues.order_by('pk'))
+        Assignment.objects.bulk_create([Assignment(issue=issue,student=peer.student) for issue in issues[:20]])
+        problem=Problem.objects.filter(items__worksheet__issues__circle=circle).distinct().order_by('pk').first()
+        Solve.objects.create(student=self.student.student,problem=problem,solved=True,changed_by=self.teacher,source_circle=circle)
+        Discussion.objects.create(circle=circle,problem=problem,discussed=True,solution_visible=True,changed_by=self.teacher)
+        result=self.request(self.teacher,f'/api/analytics?circle={circle.pk}',20)
+        self.assertEqual((result['assigned_pairs'],result['solved_pairs']),(160,1))
+        self.assertEqual(result['counts']['worksheet_recipient_count'],60)
+        self.assertEqual(sum(row['assigned'] for row in result['worksheet_rows']),4800)
+        self.assertEqual(result['counts']['full_worksheet_count'],0)
+        self.assertEqual(result['attention']['discussed_pending_problem_count'],1)
+        self.assertEqual((result['circle_rows'][0]['recipients'],result['circle_rows'][0]['assigned']),(2,160))
+        tag=Tag.objects.create(kind='problem',name='Only solved first task')
+        Problem.tags.through.objects.bulk_create([Problem.tags.through(problem=problem,tag=tag)])
+        filtered=self.request(self.teacher,f'/api/analytics?circle={circle.pk}&problem_tag={tag.pk}',21)
+        self.assertEqual((filtered['assigned_pairs'],filtered['solved_pairs']),(2,1))
+        self.assertEqual(filtered['counts']['full_worksheet_count'],0)
+        self.assertTrue(all(row['total_problem_count']==80 for row in filtered['worksheet_rows']))
+
+    def test_account_counters_have_a_constant_budget_for_independent_role_scopes(self):
+        from .account import overview
+        for user,budget in [(self.admin,6),(self.teacher,8),(self.student,5)]:
+            with CaptureQueriesContext(connection) as queries:result=overview(user)
+            self.assertLessEqual(len(queries),budget)
+            self.assertEqual(result['circle_count'],s.circles_for(user).count())
+            self.assertEqual(result['active_circle_count'],s.circles_for(user).filter(archived=False).count())
+            self.assertEqual(result['teacher'] is not None,'teacher' in user.roles)
+            self.assertEqual(result['student'] is not None,'student' in user.roles)
+        self.admin.roles=['admin','teacher','student','analyst'];self.admin.save();s.profiles(self.admin)
+        with CaptureQueriesContext(connection) as queries:result=overview(self.admin)
+        self.assertLessEqual(len(queries),13)
+        self.assertTrue(all(result[role] is not None for role in self.admin.roles))
 
     def test_enrollment_assigns_large_history_in_bulk_and_preserves_existing_dates(self):
         pupil=User.objects.create_user('budget-new@plusfolio.example','unused',name='Тестовый Ученик',roles=['student']);s.profiles(pupil)

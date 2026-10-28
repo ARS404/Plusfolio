@@ -1,0 +1,57 @@
+{
+  "baseline_ref": "6b1fb51",
+  "fixture": {
+    "circles": 60,
+    "pupils": 80,
+    "sheets": 25,
+    "problems": 80,
+    "assignments": 120000
+  },
+  "analytics": {
+    "before": {
+      "median_ms": 2098.84,
+      "queries": 13,
+      "python_peak_mib": 82.96
+    },
+    "after": {
+      "median_ms": 176.64,
+      "queries": 14,
+      "python_peak_mib": 6.11
+    }
+  },
+  "accounts": {
+    "admin": {
+      "queries_before": 8,
+      "queries_after": 6
+    },
+    "teacher": {
+      "queries_before": 10,
+      "queries_after": 8
+    },
+    "analyst": {
+      "queries_before": 8,
+      "queries_after": 5
+    },
+    "multi": {
+      "queries_before": 17,
+      "queries_after": 13
+    },
+    "all_roles": {
+      "queries_before": 18,
+      "queries_after": 12
+    },
+    "student": {
+      "queries_before": 7,
+      "queries_after": 5
+    }
+  },
+  "equivalent_reports": 13,
+  "measured_on": "2026-10-28",
+  "environment": "Local macOS arm64, SQLite, disposable synthetic database",
+  "method": {
+    "timing": "Median of three warm calls without tracemalloc; allocation peak measured separately with tracemalloc",
+    "comparison": "Complete returned dictionaries at fixed time, including role scopes and filters",
+    "command": ".venv/bin/python scripts/benchmark_reports.py --baseline-ref 6b1fb51"
+  },
+  "limitations": "Not a production SLA or total process RSS measurement. Analytics deliberately uses one additional metadata query to avoid repeating UUIDs on every assignment row. Account query counts cover overview calculations, before authentication/profile serialization."
+}

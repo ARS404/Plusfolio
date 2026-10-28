@@ -3,10 +3,21 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Count, Q
 from django.utils import timezone
 from . import services as s
 from .models import (AnalystGrant, CircleTeacher, Enrollment, Invitation, Problem,
-                     User, Worksheet, WorksheetIssue,WorksheetItem,Solve)
+                     User, Worksheet, WorksheetIssue, WorksheetItem, Solve, Assignment)
+
+
+def published_counts(model, user):
+    rows = model.objects.filter(published=True)
+    if not s.admin(user):
+        return {'own': rows.filter(author=user).count()}
+    counts = {'total': Count('pk')}
+    if 'teacher' in user.roles:
+        counts['own'] = Count('pk', filter=Q(author=user))
+    return rows.aggregate(**counts)
 
 
 def overview(user):
@@ -16,10 +27,18 @@ def overview(user):
     attending = set(Enrollment.objects.filter(student__user=user, left_at=None).values_list('circle_id', flat=True)) if 'student' in user.roles else set()
     analytical = s.analyst_circles_for(user)
     analyst_ids = set(analytical.values_list('pk', flat=True))
-    result = {'joined_at': user.date_joined.isoformat(), 'circle_count': circles.count(),
-              'active_circle_count': active.count(), 'circles': [], 'student': None,
+    counts = {'total': Count('pk'), 'active': Count('pk', filter=Q(archived=False))}
+    for role, ids in [('teacher', teaching), ('student', attending), ('analyst', analyst_ids)]:
+        if role in user.roles:
+            counts[role] = Count('pk', filter=Q(archived=False, pk__in=ids))
+    if 'analyst' in user.roles:
+        counts['analyst_cities'] = Count('city', distinct=True, filter=Q(archived=False, pk__in=analyst_ids))
+    circle_counts = circles.aggregate(**counts)
+    materials = {name: published_counts(model,user) for name,model in [('problems',Problem),('worksheets',Worksheet)]} if s.admin(user) or 'teacher' in user.roles else {}
+    result = {'joined_at': user.date_joined.isoformat(), 'circle_count': circle_counts['total'],
+              'active_circle_count': circle_counts['active'], 'circles': [], 'student': None,
               'teacher': None, 'analyst': None, 'admin': None}
-    for circle in circles.order_by('archived', 'name')[:8]:
+    for circle in circles.only('id','number','name','city','archived').order_by('archived', 'name')[:8]:
         relations = (['admin'] if s.admin(user) else [])
         relations += (['teacher'] if circle.pk in teaching else [])
         relations += (['student'] if circle.pk in attending else [])
@@ -28,27 +47,26 @@ def overview(user):
                                   'archived': circle.archived, 'relations': relations})
     if 'student' in user.roles:
         # Personal assignments stay personal even when this account also teaches or analyses.
-        problems = WorksheetItem.objects.filter(worksheet__issues__assignments__student__user=user).values('problem_id').distinct()
+        problems = WorksheetItem.objects.filter(worksheet_id__in=Assignment.objects.filter(student__user=user).values('issue__worksheet_id')).values('problem_id').distinct()
         assigned = problems.count()
         solved = Solve.objects.filter(student__user=user,solved=True,problem_id__in=problems).count()
         result['student'] = {'assigned': assigned, 'solved': solved, 'remaining': assigned-solved,
                              'percent': round(100*solved/assigned, 1) if assigned else None,
-                             'active_circles': active.filter(pk__in=attending).count()}
+                             'active_circles': circle_counts['student']}
     if 'teacher' in user.roles:
         own = active.filter(pk__in=teaching)
-        result['teacher'] = {'active_circles': own.count(),
+        result['teacher'] = {'active_circles': circle_counts['teacher'],
                              'students': Enrollment.objects.filter(circle__in=own, left_at=None).values('student_id').distinct().count(),
                              'issues': WorksheetIssue.objects.filter(circle__in=own).count(),
-                             'problems_created': Problem.objects.filter(author=user, published=True).count(),
-                             'worksheets_created': Worksheet.objects.filter(author=user, published=True).count()}
+                             'problems_created': materials['problems']['own'],
+                             'worksheets_created': materials['worksheets']['own']}
     if 'analyst' in user.roles:
-        own = analytical.filter(archived=False)
-        result['analyst'] = {'active_circles': own.count(), 'cities': own.values('city').distinct().count(),
+        result['analyst'] = {'active_circles': circle_counts['analyst'], 'cities': circle_counts['analyst_cities'],
                              'tags': list(AnalystGrant.objects.filter(user=user).values('tag__id', 'tag__name'))}
     if s.admin(user):
-        result['admin'] = {'active_circles': active.count(), 'active_users': User.objects.filter(is_active=True).count(),
-                           'problems': Problem.objects.filter(published=True).count(),
-                           'worksheets': Worksheet.objects.filter(published=True).count()}
+        result['admin'] = {'active_circles': circle_counts['active'], 'active_users': User.objects.filter(is_active=True).count(),
+                           'problems': materials['problems']['total'],
+                           'worksheets': materials['worksheets']['total']}
     if set(user.roles) - {'student'}:
         invitations = Invitation.objects.filter(state='pending', expires_at__gt=timezone.now())
         if not s.admin(user): invitations = invitations.filter(created_by=user)

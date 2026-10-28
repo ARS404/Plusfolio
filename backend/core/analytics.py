@@ -1,11 +1,12 @@
 """Permission-scoped learning reports built from assignments and current yes/no states."""
-from collections import defaultdict
+from collections import Counter, defaultdict
+from itertools import groupby
 from statistics import median
 from django.db.models import Q,Exists,OuterRef
 from django.utils import timezone
 from . import filters as f, services as s
 from .models import (Assignment, Circle, CircleTeacher, Discussion, Problem, Solve,
-                     Student, Topic, TopicCatalogVersion, Worksheet, WorksheetItem)
+                     Student, Topic, TopicCatalogVersion, Worksheet, WorksheetItem, WorksheetIssue)
 
 
 def percent(numerator, denominator):
@@ -45,32 +46,63 @@ def scoped_assignments(user, params):
     return assignments, problems, group_ids
 
 
+def _merge_recipients(target, problem_ids, recipients, unions):
+    # Equal recipient groups can serve many problems. Immutable sets let them
+    # share one allocation; a union is memoized only for the current issue.
+    for pid in problem_ids:
+        previous = target.get(pid)
+        if previous is None:
+            target[pid] = recipients
+        elif previous is not recipients:
+            merged = unions.get(previous)
+            if merged is None:
+                merged = previous if recipients <= previous else previous | recipients
+                unions[previous] = merged
+            target[pid] = merged
+
+
 def report(user, params):
     assignments, selected_problems, group_ids = scoped_assignments(user, params)
-    facts = list(assignments.values_list('student_id', 'issue_id', 'issue__worksheet_id', 'issue__circle_id'))
-    worksheet_ids = {wid for _, _, wid, _ in facts}
+    # Read issue metadata once, rather than repeating two UUIDs for every pupil.
+    issues = {iid:(wid,cid) for iid,wid,cid in WorksheetIssue.objects.filter(
+        pk__in=assignments.values('issue_id')).values_list('pk','worksheet_id','circle_id')}
+    worksheet_ids = {wid for wid,_ in issues.values()}
     worksheet_problems = defaultdict(set)
     for wid, pid in WorksheetItem.objects.filter(worksheet_id__in=worksheet_ids).values_list('worksheet_id', 'problem_id'):
         worksheet_problems[wid].add(pid)
     selected_ids = set(selected_problems.filter(items__worksheet_id__in=worksheet_ids).values_list('pk', flat=True).distinct())
     selected_by_worksheet = {wid: pids & selected_ids for wid, pids in worksheet_problems.items()}
-    pairs, issue_ids, circle_ids = set(), set(), set()
-    circle_pairs, circle_sheets = defaultdict(set), defaultdict(set)
+    issue_ids, circle_ids = set(), set()
+    circle_sheets, circle_students = defaultdict(set), defaultdict(set)
     worksheet_students, worksheet_circles, worksheet_issues = defaultdict(set), defaultdict(set), defaultdict(set)
-    for sid, iid, wid, cid in facts:
-        current = {(sid, pid) for pid in selected_by_worksheet[wid]}
-        pairs.update(current); circle_pairs[cid].update(current)
+    problem_students = {}
+    circle_problem_students = defaultdict(dict)
+    # Coalesce a whole issue's recipients before expanding its selected problems.
+    # The existing unique (issue, student) index also supports this stream order.
+    facts = assignments.order_by('issue_id','student_id').values_list('issue_id','student_id').iterator(chunk_size=2000)
+    for iid, students in groupby(facts, key=lambda row:row[0]):
+        if iid not in issues:continue
+        recipients = frozenset(sid for _,sid in students)
+        wid,cid = issues[iid]
         issue_ids.add(iid); circle_ids.add(cid); circle_sheets[cid].add(wid)
-        worksheet_students[wid].add(sid); worksheet_circles[wid].add(cid); worksheet_issues[wid].add(iid)
-    student_ids = {sid for sid, _ in pairs}
+        worksheet_students[wid].update(recipients); worksheet_circles[wid].add(cid); worksheet_issues[wid].add(iid)
+        pids = selected_by_worksheet[wid]
+        unions = {}
+        _merge_recipients(problem_students,pids,recipients,unions)
+        if cid in group_ids:
+            if pids:circle_students[cid].update(recipients)
+            _merge_recipients(circle_problem_students[cid],pids,recipients,unions)
+    student_ids = set().union(*problem_students.values()) if problem_students else set()
     all_problem_ids = set().union(*worksheet_problems.values()) if worksheet_problems else set()
-    solved_states = set(Solve.objects.filter(solved=True, student_id__in=student_ids, problem_id__in=all_problem_ids).values_list('student_id', 'problem_id'))
-    solved = pairs & solved_states
-    student_problems, student_solved, problem_students, problem_solved = (defaultdict(set) for _ in range(4))
-    for sid, pid in pairs:
-        student_problems[sid].add(pid); problem_students[pid].add(sid)
-        if (sid, pid) in solved:
-            student_solved[sid].add(pid); problem_solved[pid].add(sid)
+    solved_by_problem, solved_by_student = defaultdict(set), defaultdict(set)
+    for sid,pid in Solve.objects.filter(solved=True, student_id__in=student_ids, problem_id__in=all_problem_ids).values_list('student_id', 'problem_id').iterator(chunk_size=2000):
+        solved_by_problem[pid].add(sid); solved_by_student[sid].add(pid)
+    problem_solved = {pid:recipients & solved_by_problem[pid] for pid,recipients in problem_students.items()}
+    assigned_count = sum(map(len,problem_students.values()))
+    solved_count = sum(map(len,problem_solved.values()))
+    student_assigned, student_solved = Counter(), Counter()
+    for pid,recipients in problem_students.items():
+        student_assigned.update(recipients); student_solved.update(problem_solved[pid])
     problems = {p.pk: p for p in Problem.objects.filter(pk__in=selected_ids).only('pk','title','number','source','source_id')}
     problem_circles, problem_worksheets = defaultdict(set), defaultdict(set)
     circle_problem_ids={cid:set().union(*(selected_by_worksheet[wid] for wid in sheets)) for cid,sheets in circle_sheets.items()}
@@ -90,12 +122,12 @@ def report(user, params):
     for worksheet in Worksheet.objects.filter(pk__in=worksheet_ids).select_related('document').only('id','title','document__number').order_by('title'):
         wid = worksheet.pk; recipients = worksheet_students[wid]; pids = selected_by_worksheet[wid]
         assigned = len(recipients)*len(pids)
-        solved_count = sum((sid, pid) in solved_states for sid in recipients for pid in pids)
+        sheet_solved = sum(len(recipients & solved_by_problem[pid]) for pid in pids)
         # A filtered subset never turns an unfinished worksheet into a completed one.
-        complete = sum(all((sid, pid) in solved_states for pid in worksheet_problems[wid]) for sid in recipients)
+        complete = sum(worksheet_problems[wid] <= solved_by_student[sid] for sid in recipients)
         worksheet_rows.append({'id': str(wid), 'public_id': f'W-{worksheet.document.number_id}', 'title': worksheet.title, 'pdf_url':'/api/materials/worksheet/'+str(wid)+'/pdf', 'recipients': len(recipients),
                                'problem_count': len(pids), 'total_problem_count': len(worksheet_problems[wid]),
-                               'assigned': assigned, 'solved': solved_count, 'percent': percent(solved_count, assigned),
+                               'assigned': assigned, 'solved': sheet_solved, 'percent': percent(sheet_solved, assigned),
                                'completed_recipients': complete, 'full_percent': percent(complete, len(recipients)),
                                'circle_count': len(worksheet_circles[wid]), 'issue_count': len(worksheet_issues[wid])})
 
@@ -104,7 +136,7 @@ def report(user, params):
     distribution = [{'label': label, 'count': 0} for label in ['0%', '<25%', '25–<50%', '50–<75%', '75–<100%', '100%']]
     students_completed = students_with_solves = 0
     for student in Student.objects.filter(pk__in=student_ids).select_related('user').only('id','graduation_year','user__id','user__name').order_by('user__name'):
-        assigned = len(student_problems[student.pk]); count = len(student_solved[student.pk])
+        assigned = student_assigned[student.pk]; count = student_solved[student.pk]
         raw = 100*count/assigned
         percentages.append(raw); students_with_solves += bool(count); students_completed += count == assigned
         bucket = 0 if not count else 5 if count == assigned else 1 if raw < 25 else 2 if raw < 50 else 3 if raw < 75 else 4
@@ -150,25 +182,26 @@ def report(user, params):
         discussion_states = { (state.circle_id, state.problem_id): state for state in Discussion.objects.filter(circle_id__in=group_ids, problem_id__in=selected_ids) }
         denominator = discussed = visible = 0
         for circle in Circle.objects.filter(pk__in=group_ids & circle_ids).only('id','number','name','city','archived').order_by('name'):
-            cpairs = circle_pairs[circle.pk]; pids = circle_problem_ids[circle.pk]
-            done = len(cpairs & solved_states)
+            recipients_by_problem = circle_problem_students[circle.pk]; pids = circle_problem_ids[circle.pk]
+            assigned = sum(map(len,recipients_by_problem.values()))
+            done = sum(len(recipients & solved_by_problem[pid]) for pid,recipients in recipients_by_problem.items())
             covered = sum(bool(discussion_states.get((circle.pk, pid)) and discussion_states[circle.pk, pid].discussed) for pid in pids)
             shown = sum(bool(discussion_states.get((circle.pk, pid)) and discussion_states[circle.pk, pid].solution_visible) for pid in pids)
-            for pid in {pid for _,pid in cpairs-solved_states}:
+            for pid,recipients in recipients_by_problem.items():
                 state = discussion_states.get((circle.pk, pid))
-                if state and state.discussed: pending_discussed.add(pid)
+                if state and state.discussed and not recipients <= solved_by_problem[pid]: pending_discussed.add(pid)
             denominator += len(pids); discussed += covered; visible += shown
             circle_rows.append({'id': str(circle.pk), 'public_id':f'C-{circle.number_id}', 'name': circle.name, 'city': circle.city, 'archived': circle.archived,
-                                'recipients': len({sid for sid, _ in cpairs}), 'worksheet_count': len(circle_sheets[circle.pk]),
-                                'problem_count': len(pids), 'assigned': len(cpairs), 'solved': done, 'percent': percent(done, len(cpairs)),
+                                'recipients': len(circle_students[circle.pk]), 'worksheet_count': len(circle_sheets[circle.pk]),
+                                'problem_count': len(pids), 'assigned': assigned, 'solved': done, 'percent': percent(done, assigned),
                                 'discussed': covered, 'discussion_percent': percent(covered, len(pids))})
         discussion = {'total': denominator, 'discussed': discussed, 'remaining': denominator-discussed,
                       'visible': visible, 'percent': percent(discussed, denominator)}
 
     return {
-        'personal_only': not bool(group_ids), 'assigned_pairs': len(pairs), 'solved_pairs': len(solved),
-        'percent': percent(len(solved), len(pairs)), 'student_count': len(student_ids), 'problem_count': len(problems), 'rows': rows,
-        'counts': {'remaining_pairs': len(pairs)-len(solved), 'worksheet_count': len(worksheet_rows), 'issue_count': len(issue_ids),
+        'personal_only': not bool(group_ids), 'assigned_pairs': assigned_count, 'solved_pairs': solved_count,
+        'percent': percent(solved_count, assigned_count), 'student_count': len(student_ids), 'problem_count': len(problems), 'rows': rows,
+        'counts': {'remaining_pairs': assigned_count-solved_count, 'worksheet_count': len(worksheet_rows), 'issue_count': len(issue_ids),
                    'circle_count': len(circle_ids), 'full_worksheet_count': sum(row['completed_recipients'] for row in worksheet_rows),
                    'worksheet_recipient_count': sum(row['recipients'] for row in worksheet_rows),
                    'students_with_solves': students_with_solves, 'students_without_solves': len(student_ids)-students_with_solves,
