@@ -101,11 +101,6 @@ def backup_key(values):
     values['BACKUP_RECIPIENT']=result.stdout.decode().strip();write_env(values)
 
 
-def save_release():
-    result=compose('images','--format','json',stdout=subprocess.PIPE)
-    (STATE/'image-lock.json').write_bytes(result.stdout)
-
-
 def verify_external(values):
     context=None
     if values['PUBLIC_HOST']=='localhost':
@@ -175,7 +170,7 @@ def run(args):
                 docker('stop',item['Id'],stdout=subprocess.DEVNULL)
         compose('up','--detach','--wait','--wait-timeout','600')
         compose('exec','-T','mail','python','backend/manage.py','check_smtp')
-        verify_local(values);save_release()
+        verify_local(values)
         print('Plusfolio ready locally: http://127.0.0.1:'+values['LOCAL_PORT'])
         print('Connect the existing HTTPS proxy for '+values['PUBLIC_URL']+'; see proxy-config nginx|caddy|traefik, then check-public.')
         print('Save .deploy/backup.key separately; encrypted backups and retention are running.')

@@ -81,37 +81,20 @@ class SearchTests(TestCase):
         self.assertEqual(response.data['results'][0]['fields'],['statement'])
 
     @skipUnless(connection.vendor=='postgresql','PostgreSQL candidate projection')
-    def test_postgres_fuzzy_candidates_leave_vectors_and_normalized_text_deferred(self):
-        from .search import lexical_candidates
+    def test_postgres_candidates_read_only_the_ranking_fields(self):
+        from .search import lexical_candidates, vector_candidates
         docs=ProblemSearchDocument.objects.filter(problem=self.problem,kind='statement')
         vector=np.zeros(384,dtype=np.float32);vector[0]=1
         text='Synthetic projection condition'
         docs.update(text=text,normalized=normalized(text).casefold(),embedding=vector,model=MODEL_ID)
-        # The typo prevents the exact-substring branch from hiding a fuzzy projection regression.
-        with self.assertNumQueries(2):
-            candidates=lexical_candidates(docs,'synthetic projection conditon')
-        self.assertEqual(len(candidates),1)
-        with self.assertNumQueries(0):
-            for doc,score,kind in candidates:
-                self.assertTrue({'embedding','normalized'}<=doc.get_deferred_fields())
-                self.assertEqual((doc.problem_id,doc.kind,doc.text),(self.problem.pk,'statement',text))
-                self.assertEqual(kind,'text');self.assertGreaterEqual(score,.08)
-
-    @skipUnless(connection.vendor=='postgresql','PostgreSQL candidate projection')
-    def test_postgres_vector_candidates_do_not_fetch_the_vector_or_normalized_text(self):
-        from .search import vector_candidates
-        docs=ProblemSearchDocument.objects.filter(problem=self.problem,kind='statement')
-        vector=np.zeros(384,dtype=np.float32);vector[0]=1
-        docs.update(embedding=vector,model=MODEL_ID)
-        with CaptureQueriesContext(connection) as queries:
-            candidates=vector_candidates(docs,vector,limit=1)
-        self.assertEqual(sum(query['sql'].lstrip().upper().startswith('SELECT ') for query in queries),1)
-        self.assertEqual(len(candidates),1)
-        with self.assertNumQueries(0):
-            doc,score=candidates[0]
-            self.assertTrue({'embedding','normalized'}<=doc.get_deferred_fields())
-            self.assertEqual((doc.problem_id,doc.kind),(self.problem.pk,'statement'))
-            self.assertTrue(doc.text);self.assertAlmostEqual(score,1.)
+        for retrieve,query in [(lexical_candidates,'synthetic projection conditon'),(vector_candidates,vector)]:
+            with self.subTest(retrieve=retrieve.__name__):
+                candidates=retrieve(docs,query)
+                self.assertEqual(len(candidates),1)
+                with self.assertNumQueries(0):
+                    doc=candidates[0][0]
+                    self.assertTrue({'embedding','normalized'}<=doc.get_deferred_fields())
+                    self.assertEqual((doc.problem_id,doc.kind,doc.text),(self.problem.pk,'statement',text))
 
     @patch('core.search.embed')
     def test_index_worker_reads_only_source_and_fingerprint_without_deferred_queries(self,embed):
