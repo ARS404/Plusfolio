@@ -192,12 +192,14 @@ def material_data(material,user,detail=False,circle=None,allowed_solutions=None)
         from .worksheets import metadata
         result.update(metadata(material,user))
         result.update(references('/api/materials/worksheet/'+str(material.pk),material.title));result['template_version']=material.template_version
-        problem_ids=material._problem_ids if hasattr(material,'_problem_ids') else list(material.items.values_list('problem_id',flat=True))
+        if detail:
+            problems=[i.problem for i in material.items.select_related('problem__author').prefetch_related('problem__topics','problem__tags')]
+            problem_ids=[p.pk for p in problems]
+        else:problem_ids=material._problem_ids if hasattr(material,'_problem_ids') else list(material.items.values_list('problem_id',flat=True))
         result['problem_count']=len(problem_ids)
         result['problem_ids']=[str(pk) for pk in problem_ids]
         if detail:
-            problems=[i.problem for i in material.items.select_related('problem__author').prefetch_related('problem__topics','problem__tags')]
-            visible=s.visible_solution_ids(user,[p.pk for p in problems],circle) if allowed_solutions is None else allowed_solutions
+            visible=s.visible_solution_ids(user,problem_ids,circle) if allowed_solutions is None else allowed_solutions
             result['problems']=[material_data(p,user,circle=circle,allowed_solutions=visible) for p in problems]
             result['solutions_available']=bool(visible)
     return result

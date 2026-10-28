@@ -10,6 +10,7 @@ from rest_framework.exceptions import APIException
 ROOT=Path(__file__).resolve().parent
 TEMPLATE='math-a4-v1'
 WORKERS=threading.BoundedSemaphore(2)
+TEXT_ESCAPES=str.maketrans({'\\':r'\textbackslash{}','{':r'\{','}':r'\}','$':r'\$','&':r'\&','#':r'\#','%':r'\%','_':r'\_','^':r'\textasciicircum{}','~':r'\textasciitilde{}'})
 
 
 def validate_tex(source):
@@ -21,8 +22,7 @@ def validate_tex(source):
 
 
 def escape_text(value):
-    replacements={'\\':r'\textbackslash{}','{':r'\{','}':r'\}','$':r'\$','&':r'\&','#':r'\#','%':r'\%','_':r'\_','^':r'\textasciicircum{}','~':r'\textasciitilde{}'}
-    return ''.join(replacements.get(char,char) for char in str(value))
+    return str(value).translate(TEXT_ESCAPES)
 
 
 def fragment(problem,field):
@@ -105,7 +105,6 @@ def compiler_environment():
 
 def render_pdf(project,diagnostics=None):
     cache=settings.LOCAL_DIR/'pdf-cache';cache.mkdir(mode=0o700,exist_ok=True)
-    compiler=shutil.which(str(getattr(settings,'TEX_COMPILER',settings.LOCAL_DIR/'tools'/'tectonic')))
     # The compiler version and complete authorized project identify the PDF, including solution masks.
     digest=hashlib.sha256(('tectonic-0.17.0\n'+json.dumps(project,sort_keys=True,ensure_ascii=False)).encode()).hexdigest()
     target=cache/(digest+'.pdf')
@@ -119,6 +118,7 @@ def render_pdf(project,diagnostics=None):
         temporary=target.with_suffix('.'+str(uuid4())+'.tmp')
         temporary.write_bytes(pdf);os.replace(temporary,target)
         return pdf
+    compiler=shutil.which(str(getattr(settings,'TEX_COMPILER',settings.LOCAL_DIR/'tools'/'tectonic')))
     if not compiler:raise CompilerUnavailable()
     if not WORKERS.acquire(blocking=False):raise CompilerUnavailable('Сборка PDF занята. Повторите через несколько секунд.')
     try:

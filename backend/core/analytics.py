@@ -146,7 +146,7 @@ def report(user, params):
                                  'assigned': assigned, 'solved': count, 'remaining': assigned-count, 'percent': round(raw, 1)})
 
     # Ancestors roll up each unique student/task pair once, even with overlapping topics.
-    nodes = {node['id']: node for node in Topic.objects.values('id', 'number_id', 'name', 'parent_id')}
+    nodes = {node['id']: node for node in Topic.objects.values('id', 'number_id', 'name', 'parent_id')} if selected_ids else {}
     ancestor_cache = {}
     def ancestors(tid):
         if tid not in ancestor_cache:

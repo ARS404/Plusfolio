@@ -222,6 +222,6 @@ def retrieve(user,problems,text,field='all',limit=20,semantic=True):
     matches=dict(ranked)
     if 'statement' in selected_fields(field) and len(text) <= 160:
         # Preserve title, source-number and UUID search as additional candidates.
-        for problem in s.search_problems(problems, text).exclude(pk__in=matches)[:limit]:
-            matches[problem.pk] = {'score':.01, 'kind':'text', 'fields':set(), 'excerpt':problem.statement[:500]}
+        for pk,statement in s.search_problems(problems, text).exclude(pk__in=matches).values_list('pk','statement')[:limit]:
+            matches[pk] = {'score':.01, 'kind':'text', 'fields':set(), 'excerpt':statement[:500]}
     return sorted(matches.items(),key=lambda item:(-item[1]['score'],str(item[0])))[:limit],metadata

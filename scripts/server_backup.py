@@ -85,11 +85,9 @@ def _backup():
         for path in Path('/model').rglob('*'):
             if path.is_file() and not path.is_symlink():paths['model/'+str(path.relative_to('/model'))]=path
         # The decrypting key is deliberately excluded. Keep it outside the server too.
-        deployment=Path('/deployment')
-        configurations=[deployment/'env']
-        for path in configurations:
-            if path.is_file() and not path.is_symlink() and path.name!='backup.key':
-                paths['source/.deploy/'+str(path.relative_to(deployment))]=path
+        config=Path('/deployment/env')
+        if config.is_file() and not config.is_symlink():
+            paths['source/.deploy/env']=config
         for path in Path('/run/secrets').glob('*'):
             if path.is_file() and path.name in {'app_key','postgres_password','db_password','smtp_password','admin_password'}:
                 paths['source/.deploy/secrets/'+path.name]=path

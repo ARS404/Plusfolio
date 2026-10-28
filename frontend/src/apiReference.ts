@@ -40,7 +40,9 @@ export function endpoints(spec:ApiSpec):Endpoint[]{
 const normalize=(value:string)=>value.toLocaleLowerCase('ru').replace(/ё/g,'е');
 export function filterEndpoints(items:Endpoint[],query:string,methods:string[]=[],groups:string[]=[]){
  const words=normalize(query).trim().split(/\s+/).filter(Boolean);
- return items.filter(item=>!methods.length||methods.includes(item.method)).filter(item=>!groups.length||groups.includes(item.group)).filter(item=>{
+ return items.filter(item=>{
+  if(methods.length&&!methods.includes(item.method)||groups.length&&!groups.includes(item.group))return false;
+  if(!words.length)return true;
   const text=normalize([item.method,item.path,item.summary,item.description,item.groupLabel,item.searchText,...(item.parameters||[]).map(p=>p.name+' '+p.description)].join(' '));
   return words.every(word=>text.includes(word));
  });
