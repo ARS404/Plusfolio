@@ -36,7 +36,10 @@ x-app: &app
     - runtime:/app/.local
     - tex-socket:/run/plusfolio-tex
   pids_limit: 128
-  mem_limit: 1g
+  mem_limit: ${WEB_MEMORY:-512m}
+  memswap_limit: ${WEB_MEMORY:-512m}
+  cpus: ${WEB_CPUS:-0.30}
+  cpu_shares: 128
   logging:
     driver: json-file
     options: {max-size: "10m", max-file: "3"}
@@ -59,11 +62,18 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
-    mem_limit: 768m
+    mem_limit: ${DB_MEMORY:-512m}
+    memswap_limit: ${DB_MEMORY:-512m}
+    cpus: ${DB_CPUS:-0.30}
+    cpu_shares: 128
+    pids_limit: 128
+    logging: &small-logs
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
     shm_size: 128m
   redis:
     image: redis:8.8-alpine
-    command: [redis-server,--maxmemory,128mb,--maxmemory-policy,allkeys-lru,--save,"",--appendonly,"no"]
+    command: [redis-server,--maxmemory,64mb,--maxmemory-policy,allkeys-lru,--save,"",--appendonly,"no"]
     restart: unless-stopped
     networks: [backend]
     read_only: true
@@ -73,22 +83,31 @@ services:
       test: [CMD,redis-cli,ping]
       interval: 5s
       retries: 20
-    mem_limit: 192m
+    mem_limit: ${REDIS_MEMORY:-128m}
+    memswap_limit: ${REDIS_MEMORY:-128m}
+    cpus: ${REDIS_CPUS:-0.05}
+    cpu_shares: 128
+    pids_limit: 64
+    logging: *small-logs
   embeddings:
     build:
       context: .
       dockerfile: embeddings/Dockerfile
     image: ${PLUSFOLIO_EMBEDDINGS_IMAGE:-plusfolio-embeddings:local}
     restart: unless-stopped
-    environment: {EMBEDDING_THREADS: "2"}
+    environment: {EMBEDDING_THREADS: "1"}
     volumes: [model:/model:ro]
     networks: [backend]
     read_only: true
     tmpfs: ["/tmp:size=32m,mode=1777"]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    cpus: 2
-    mem_limit: 2g
+    cpus: ${EMBEDDINGS_CPUS:-0.75}
+    cpu_shares: 128
+    mem_limit: ${EMBEDDINGS_MEMORY:-1g}
+    memswap_limit: ${EMBEDDINGS_MEMORY:-1g}
+    pids_limit: 64
+    logging: *small-logs
   tex:
     <<: *app
     image: ${PLUSFOLIO_TEX_IMAGE:-plusfolio-tex:local}
@@ -103,7 +122,9 @@ services:
     secrets: []
     volumes: [tex-socket:/run/plusfolio-tex]
     network_mode: none
-    mem_limit: 1g
+    mem_limit: ${TEX_MEMORY:-512m}
+    memswap_limit: ${TEX_MEMORY:-512m}
+    cpus: ${TEX_CPUS:-0.30}
     pids_limit: 48
     healthcheck:
       test: [CMD,python,-c,"import socket,json; s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(2); s.connect('/run/plusfolio-tex/compiler.sock'); p=json.dumps({'health':True}).encode(); s.sendall(str(len(p)).encode()+b'\\n'+p); f=s.makefile('rb'); n=int(f.readline()); assert json.loads(f.read(n))['ok']"]
@@ -114,6 +135,9 @@ services:
     <<: *app
     networks: [backend]
     restart: "no"
+    mem_limit: ${INITIALIZE_MEMORY:-384m}
+    memswap_limit: ${INITIALIZE_MEMORY:-384m}
+    cpus: ${INITIALIZE_CPUS:-0.50}
     command: [sh,-c,"python backend/manage.py migrate --noinput && python backend/manage.py bootstrap_server && python backend/manage.py check --deploy --fail-level WARNING"]
     environment:
       <<: *environment
@@ -126,11 +150,15 @@ services:
       redis: {condition: service_healthy}
   web:
     <<: *app
+    ports: ["127.0.0.1:${LOCAL_PORT:-18080}:8000"]
     build:
       context: .
       dockerfile: deploy/Dockerfile
       target: application
-    networks: [backend,frontend]
+    networks:
+      backend: {}
+      frontend:
+        aliases: ["${COMPOSE_PROJECT_NAME:-plusfolio}-web"]
     depends_on:
       initialize: {condition: service_completed_successfully}
       embeddings: {condition: service_healthy}
@@ -144,11 +172,15 @@ services:
       start_period: 30s
   indexer:
     <<: *app
+    mem_limit: ${INDEXER_MEMORY:-256m}
+    memswap_limit: ${INDEXER_MEMORY:-256m}
+    cpus: ${INDEXER_CPUS:-0.15}
+    pids_limit: 64
     networks: [backend]
     healthcheck:
       test: [CMD,python,scripts/server_probe.py,index]
       interval: 20s
-      timeout: 5s
+      timeout: 10s
       retries: 5
     command: [python,-u,backend/manage.py,index_problem_search,--watch]
     depends_on:
@@ -156,6 +188,10 @@ services:
       embeddings: {condition: service_healthy}
   mail:
     <<: *app
+    mem_limit: ${MAIL_MEMORY:-192m}
+    memswap_limit: ${MAIL_MEMORY:-192m}
+    cpus: ${MAIL_CPUS:-0.05}
+    pids_limit: 48
     command: [python,-u,backend/manage.py,deliver_invitations,--watch]
     networks: [backend,frontend]
     depends_on:
@@ -163,13 +199,13 @@ services:
     healthcheck:
       test: [CMD,python,scripts/server_probe.py,mail]
       interval: 20s
-      timeout: 5s
+      timeout: 15s
       retries: 5
   backup:
     <<: *app
     networks: [backend]
     healthcheck:
-      test: [CMD,python,-c,"import os,time; assert time.time()-float(open('/backups/last-success').read())<int(os.environ.get('BACKUP_INTERVAL','86400'))+180"]
+      test: [CMD-SHELL,"test -f /backups/last-success && now=$$(date +%s) && previous=$$(cut -d. -f1 /backups/last-success) && test $$((now - previous)) -lt $$((BACKUP_INTERVAL + 180))"]
       interval: 30s
       timeout: 5s
       start_period: 120s
@@ -181,6 +217,10 @@ services:
       <<: *environment
       BACKUP_RECIPIENT: ${BACKUP_RECIPIENT:-}
       BACKUP_INTERVAL: ${BACKUP_INTERVAL:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_MAX_COUNT: ${BACKUP_MAX_COUNT:-14}
+      BACKUP_MAX_BYTES: ${BACKUP_MAX_BYTES:-2147483648}
+      BACKUP_KEEP_MIN: ${BACKUP_KEEP_MIN:-2}
     volumes:
       - runtime:/app/.local:ro
       - model:/model:ro
@@ -188,27 +228,10 @@ services:
       - ./.deploy/env:/deployment/env:ro
     depends_on:
       initialize: {condition: service_completed_successfully}
-    mem_limit: 1g
-  proxy:
-    image: caddy:2.11.7-alpine
-    restart: unless-stopped
-    environment:
-      PUBLIC_HOST: ${PUBLIC_HOST}
-      ACME_EMAIL: ${ADMIN_EMAIL}
-    ports:
-      - "${BIND_ADDRESS:-0.0.0.0}:${HTTP_PORT:-80}:80"
-      - "${BIND_ADDRESS:-0.0.0.0}:${HTTPS_PORT:-443}:443"
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - certificates:/data
-      - proxy-config:/config
-    networks: [frontend]
-    depends_on:
-      web: {condition: service_healthy}
-    mem_limit: 128m
-    cap_drop: [ALL]
-    cap_add: [NET_BIND_SERVICE]
-    security_opt: [no-new-privileges:true]
+    mem_limit: ${BACKUP_MEMORY:-256m}
+    memswap_limit: ${BACKUP_MEMORY:-256m}
+    cpus: ${BACKUP_CPUS:-0.10}
+    pids_limit: 64
 
 networks:
   backend: {internal: true}
@@ -218,8 +241,6 @@ volumes:
   runtime: {}
   model: {}
   tex-socket: {}
-  certificates: {}
-  proxy-config: {}
   backups: {}
 secrets:
   app_key: {file: ./.deploy/secrets/app_key}

@@ -9,9 +9,11 @@ permissions:
 jobs:
   server:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Verify shared-host safeguards and backup retention
+        run: python3 deploy/test_shared_host.py
       - name: Build a clean Linux server and exercise HTTPS, SMTP, CPU search, TeX and backups
         run: python3 deploy/check_server.py --keep
       - name: Verify download integrity and immutable dependency locks

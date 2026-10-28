@@ -19,7 +19,8 @@ COPY scripts/download_asset.py scripts/install_locked.py scripts/
 RUN python scripts/install_locked.py requirements-server.lock
 COPY scripts/setup_tex.py scripts/setup_tex.py
 COPY backend/core/tex_templates/ backend/core/tex_templates/
-RUN python scripts/setup_tex.py
+RUN --mount=type=cache,id=plusfolio-tectonic-0.17.0-v33,target=/var/cache/plusfolio-tex,sharing=locked \
+    PLUSFOLIO_TEX_SHARED_CACHE=/var/cache/plusfolio-tex python scripts/setup_tex.py
 
 FROM prepared AS application
 COPY backend/ backend/

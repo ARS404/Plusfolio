@@ -12,6 +12,6 @@ class Command(BaseCommand):
             close_old_connections()
             try:count=deliver_batch()
             except RuntimeError as exc:raise CommandError(str(exc))
-            cache.set('worker:mail',time.time(),60)
+            cache.set('worker:mail',int(time.time()),60)
             if not options['watch']:self.stdout.write(f'Processed invitations: {count}');return
             if not count:time.sleep(5)

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """One-command server setup. Secrets are read from prompts/files, never CLI arguments."""
-import argparse,getpass,json,os,re,secrets,shlex,subprocess,sys,time,urllib.parse,urllib.request,ssl
+import argparse,getpass,hashlib,json,os,re,secrets,subprocess,sys,time,urllib.parse,urllib.request,ssl
+import server_host
 from email.utils import parseaddr
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
@@ -12,7 +13,9 @@ def docker(*args,**kwargs):return subprocess.run(['docker',*args],cwd=ROOT,check
 def compose(*args,**kwargs):
     probe=subprocess.run(['docker','compose','version'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     prefix=['docker','compose'] if probe.returncode==0 else ['docker-compose']
-    return subprocess.run([*prefix,'--env-file',str(STATE/'env'),'-f',str(ROOT/'compose.yml'),*args],cwd=ROOT,check=True,**kwargs)
+    values=read_env()
+    kwargs.setdefault('env',{**os.environ,**{key:str(value) for key,value in values.items()}})
+    return subprocess.run([*prefix,'--project-name',values['COMPOSE_PROJECT_NAME'],'--env-file',str(STATE/'env'),'-f',str(ROOT/'compose.yml'),*args],cwd=ROOT,check=True,**kwargs)
 
 def write_env(values):
     if (STATE/'env').exists():(STATE/'env').chmod(0o600)
@@ -28,7 +31,9 @@ def read_env():
 
 def configure(config=None):
     STATE.mkdir(mode=0o700,exist_ok=True);STATE.chmod(0o700)
-    if (STATE/'env').exists():return read_env()
+    if (STATE/'env').exists():
+        previous=read_env()
+        return server_host.shared_values(previous,legacy=previous.get('DEPLOYMENT_MODE')!='shared')
     data=json.loads(Path(config).read_text()) if config else {}
     def ask(key,prompt,default=''):
         if key in data:return str(data[key])
@@ -56,11 +61,13 @@ def configure(config=None):
     ssl_mode=str(data.get('smtp_ssl','1' if port=='465' else '0'))
     tls=str(data.get('smtp_tls','0' if ssl_mode=='1' else '1'))
     if tls=='1' and ssl_mode=='1':raise ValueError('Выберите STARTTLS или SSL, не оба')
-    project=data.get('project','plusfolio')
+    local_port=ask('local_port','Локальный порт Plusfolio (только 127.0.0.1)','18080')
+    project=data.get('project','plusfolio-'+hashlib.sha256(str(ROOT).encode()).hexdigest()[:8])
     if not re.fullmatch(r'[a-z0-9][a-z0-9_-]*',project):raise ValueError('Некорректное имя проекта')
     values={'INSTANCE_ID':secrets.token_hex(16),'COMPOSE_PROJECT_NAME':project,'PUBLIC_URL':url,'PUBLIC_HOST':parsed.hostname,'ADMIN_EMAIL':admin,'ADMIN_NAME':admin_name,
         'SMTP_HOST':host,'SMTP_PORT':port,'SMTP_USER':user,'SMTP_FROM':sender,'SMTP_TLS':tls,'SMTP_SSL':ssl_mode,
-        'BIND_ADDRESS':data.get('bind_address','0.0.0.0'),'HTTP_PORT':data.get('http_port','80'),'HTTPS_PORT':data.get('https_port','443')}
+        'LOCAL_PORT':local_port}
+    values=server_host.shared_values(values)
     (STATE/'secrets').mkdir(mode=0o700,exist_ok=True)
     for name,value in {'app_key':secrets.token_urlsafe(64),'postgres_password':secrets.token_urlsafe(32),
         'db_password':secrets.token_urlsafe(32),'admin_password':password,'smtp_password':smtp_password or ''}.items():
@@ -76,10 +83,10 @@ def backup_key(values):
     path=STATE/'backup.key'
     image=values.get('PLUSFOLIO_APP_IMAGE','plusfolio-app:local')
     if not path.exists():
-        with path.open('wb') as stream:docker('run','--rm','--network','none','--entrypoint','age-keygen',image,stdout=stream)
+        with path.open('wb') as stream:docker('run','--rm','--network','none','--cpus','0.25','--memory','256m','--memory-swap','256m','--pids-limit','64','--entrypoint','age-keygen',image,stdout=stream)
         path.chmod(0o600)
     with path.open('rb') as stream:
-        result=docker('run','--rm','-i','--network','none','--entrypoint','age-keygen',image,'-y',stdin=stream,stdout=subprocess.PIPE)
+        result=docker('run','--rm','-i','--network','none','--cpus','0.25','--memory','256m','--memory-swap','256m','--pids-limit','64','--entrypoint','age-keygen',image,'-y',stdin=stream,stdout=subprocess.PIPE)
     values['BACKUP_RECIPIENT']=result.stdout.decode().strip();write_env(values)
 
 
@@ -109,27 +116,76 @@ def verify_external(values):
             time.sleep(2)
 
 
+def preflight(values,require_build=False):
+    server_host.tools_ready(require_build)
+    containers=server_host.project_containers(docker,values,ROOT)
+    config=json.loads(compose('config','--format','json',stdout=subprocess.PIPE).stdout)
+    budget=server_host.check_limits(config)
+    published=config['services']['web']['ports']
+    if len(published)!=1 or str(published[0]['published'])!=str(values['LOCAL_PORT']):raise RuntimeError('Порт в Compose не совпадает с LOCAL_PORT')
+    server_host.port_available(values['LOCAL_PORT'],containers)
+    return containers,budget
+
+
+def verify_local(values):
+    url='http://127.0.0.1:'+str(values['LOCAL_PORT'])+'/healthz'
+    for attempt in range(30):
+        try:
+            with urllib.request.urlopen(url,timeout=10) as response:
+                body=json.load(response)
+                if response.status==200 and body.get('ok') and body.get('instance')==values['INSTANCE_ID']:return url
+        except Exception:pass
+        if attempt==29:raise RuntimeError('Локальная проверка готовности не прошла. Проверьте logs и LOCAL_PORT.')
+        time.sleep(2)
+
+
 def run(args):
-    if args.command=='init':values=configure(args.config)
+    require_build=args.command in {'init','update'} and not getattr(args,'no_build',False)
+    if args.command=='init':
+        server_host.tools_ready(require_build)
+        values=configure(args.config)
     elif (STATE/'env').exists():values=read_env()
     elif args.command in {'verify-backup','restore-backup'}:values={}
+    elif args.command=='doctor':
+        server_host.tools_ready(True);server_host.port_available('18080',[])
+        print('Docker/Compose/Buildx доступны; локальный порт 18080 свободен. Системные настройки не изменены.');return
     else:raise ValueError('Сначала выполните init: конфигурация сервера не найдена')
-    if args.command in {'init','up','update'}:
-        compose('config','--quiet')
-        if args.command in {'init','update'}:compose('build','--pull')
+    if args.command in {'init','up','update','doctor'}:
+        values=server_host.shared_values(values,legacy=values.get('DEPLOYMENT_MODE')!='shared')
+        containers,budget=preflight(values,require_build)
+        print('Лимиты служб: '+str(budget['cpus'])+' CPU, '+str(budget['memory_mib'])+' МиБ памяти (сумма верхних границ).',flush=True)
+        if args.command=='doctor':return
+        write_env(values)
+        if require_build:server_host.build_images(docker,values,ROOT)
         backup_key(values)
+        # Migrate only this checkout's former edge; never touch another project's proxy.
+        for item in containers:
+            if (item.get('Config',{}).get('Labels') or {}).get('com.docker.compose.service')=='proxy':
+                docker('stop',item['Id'],stdout=subprocess.DEVNULL)
         compose('up','--detach','--wait','--wait-timeout','600')
         compose('exec','-T','mail','python','backend/manage.py','check_smtp')
-        verify_external(values);save_release()
-        print('Plusfolio ready: '+values['PUBLIC_URL'])
-        print('Save .deploy/backup.key separately; automatic encrypted backups are running.')
-    elif args.command=='status':compose('ps')
+        verify_local(values);save_release()
+        print('Plusfolio ready locally: http://127.0.0.1:'+values['LOCAL_PORT'])
+        print('Connect the existing HTTPS proxy for '+values['PUBLIC_URL']+'; see proxy-config nginx|caddy|traefik, then check-public.')
+        print('Save .deploy/backup.key separately; encrypted backups and retention are running.')
+    elif args.command in {'status','logs','backup','prune-backups','download-backup','export-images','restore-database','stop'}:
+        server_host.tools_ready()
+        server_host.project_containers(docker,values,ROOT)
+        operate(args,values)
+    elif args.command=='check-public':verify_external(values);print('Public HTTPS verified: '+values['PUBLIC_URL'])
+    elif args.command=='proxy-config':print(server_host.proxy_config(server_host.shared_values(values),args.kind))
+    else:operate(args,values)
+
+
+def operate(args,values):
+    if args.command=='status':compose('ps')
     elif args.command=='logs':compose('logs','--tail','80',*(args.services or []))
     elif args.command=='backup':compose('exec','-T','backup','python','scripts/server_backup.py')
+    elif args.command=='prune-backups':compose('exec','-T','backup','python','scripts/server_backup.py','--prune-only')
     elif args.command=='verify-backup':
         path=Path(args.file).resolve();key=Path(args.key or STATE/'backup.key').resolve()
-        docker('run','--rm','--network','none','--user','0:0','--mount',f'type=bind,src={path},dst=/backup.age,readonly',
-            '--mount',f'type=bind,src={key},dst=/backup.key,readonly',values.get('PLUSFOLIO_APP_IMAGE','plusfolio-app:local'),
+        docker('run','--rm','--network','none','--cpus','0.25','--memory','256m','--memory-swap','256m','--pids-limit','64','--cap-drop','ALL','--security-opt','no-new-privileges','--user',str(os.getuid())+':'+str(os.getgid()),'--mount',f'type=bind,src={path},dst=/backup.age,readonly',
+            '--mount',f'type=bind,src={key},dst=/backup.key,readonly',getattr(args,'image',None) or values.get('PLUSFOLIO_APP_IMAGE','plusfolio-app:local'),
             'python','scripts/server_backup.py','--verify','/backup.age','--key','/backup.key')
     elif args.command=='download-backup':
         destination=Path(args.into).resolve();destination.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -143,14 +199,16 @@ def run(args):
     elif args.command=='restore-backup':
         path=Path(args.file).resolve();key=Path(args.key or STATE/'backup.key').resolve();destination=Path(args.into).resolve()
         if destination.exists():raise ValueError('Restore destination must not exist')
-        destination.parent.mkdir(parents=True,exist_ok=True)
-        docker('run','--rm','--network','none','--user','0:0','--mount',f'type=bind,src={path},dst=/backup.age,readonly',
-            '--mount',f'type=bind,src={key},dst=/backup.key,readonly','--mount',f'type=bind,src={destination.parent},dst=/output',
-            values.get('PLUSFOLIO_APP_IMAGE','plusfolio-app:local'),'python','scripts/server_backup.py','--verify','/backup.age','--key','/backup.key','--into','/output/'+destination.name)
+        destination.mkdir(parents=True,mode=0o700)
+        docker('run','--rm','--network','none','--cpus','0.25','--memory','256m','--memory-swap','256m','--pids-limit','64','--cap-drop','ALL','--security-opt','no-new-privileges','--user',str(os.getuid())+':'+str(os.getgid()),'--mount',f'type=bind,src={path},dst=/backup.age,readonly',
+            '--mount',f'type=bind,src={key},dst=/backup.key,readonly','--mount',f'type=bind,src={destination},dst=/output',
+            getattr(args,'image',None) or values.get('PLUSFOLIO_APP_IMAGE','plusfolio-app:local'),'python','scripts/server_backup.py','--verify','/backup.age','--key','/backup.key','--into','/output','--empty-output')
         import shutil
         config=destination/'source/.deploy/env'
         restored={name:json.loads(value) for name,value in (line.split('=',1) for line in config.read_text().splitlines() if line)}
-        restored['COMPOSE_PROJECT_NAME']='plusfolio-restored-'+str(int(time.time()))
+        restored['COMPOSE_PROJECT_NAME']='plusfolio-restored-'+str(time.time_ns())
+        restored['INSTANCE_ID']=secrets.token_hex(16)
+        restored=server_host.shared_values(restored,legacy=restored.get('DEPLOYMENT_MODE')!='shared')
         config.chmod(0o600)
         config.write_text(''.join(name+'='+json.dumps(str(value),ensure_ascii=False)+'\n' for name,value in sorted(restored.items())))
         config.chmod(0o444)
@@ -170,12 +228,14 @@ def run(args):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);sub=parser.add_subparsers(dest='command',required=True)
-    init=sub.add_parser('init');init.add_argument('--config',help='JSON file for unattended setup; secrets never go in CLI arguments')
-    for name in ['up','update','status','backup','stop']:sub.add_parser(name)
+    init=sub.add_parser('init');init.add_argument('--no-build',action='store_true');init.add_argument('--config',help='JSON file for unattended setup; secrets never go in CLI arguments')
+    update=sub.add_parser('update');update.add_argument('--no-build',action='store_true')
+    for name in ['up','status','backup','prune-backups','stop','doctor','check-public']:sub.add_parser(name)
+    proxy=sub.add_parser('proxy-config');proxy.add_argument('kind',choices=['nginx','caddy','traefik'])
     logs=sub.add_parser('logs');logs.add_argument('services',nargs='*')
-    restore=sub.add_parser('restore-backup');restore.add_argument('file');restore.add_argument('--key');restore.add_argument('--into',required=True)
+    restore=sub.add_parser('restore-backup');restore.add_argument('file');restore.add_argument('--key');restore.add_argument('--into',required=True);restore.add_argument('--image',help='Loaded application image for recovery on a fresh host')
     database=sub.add_parser('restore-database');database.add_argument('file')
-    check=sub.add_parser('verify-backup');check.add_argument('file');check.add_argument('--key')
+    check=sub.add_parser('verify-backup');check.add_argument('file');check.add_argument('--key');check.add_argument('--image')
     download=sub.add_parser('download-backup');download.add_argument('into')
     export=sub.add_parser('export-images');export.add_argument('file')
     args=parser.parse_args()

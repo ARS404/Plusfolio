@@ -20,7 +20,7 @@ class Command(BaseCommand):
         rebuild=options['rebuild']
         while True:
             close_old_connections()
-            cache.set('worker:index',time.time(),60)
+            cache.set('worker:index',int(time.time()),60)
             reconcile_missing(rebuild)
             catalogue_search.reconcile(rebuild)
             rebuild=False

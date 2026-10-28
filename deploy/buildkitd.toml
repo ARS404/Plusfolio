@@ -1,0 +1,7 @@
+# Used only by this Plusfolio instance's dedicated builder.
+[worker.oci]
+  max-parallelism = 1
+  gc = true
+  reservedSpace = "512MB"
+  maxUsedSpace = "2GB"
+  minFreeSpace = "2GB"

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Streaming authenticated age backups: database, source, runtime, model and configuration."""
-import argparse,hashlib,io,json,os,subprocess,tarfile,time
+import argparse,fcntl,hashlib,io,json,os,re,stat,subprocess,tarfile,time
 from datetime import datetime,timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -13,7 +13,54 @@ class HashedReader:
         value=self.source.read(size);self.digest.update(value);return value
 
 
+
+def retention_policy(values=None):
+    values=os.environ if values is None else values
+    policy={key:int(values.get(name,default)) for key,name,default in [
+        ('days','BACKUP_RETENTION_DAYS','14'),('count','BACKUP_MAX_COUNT','14'),
+        ('bytes','BACKUP_MAX_BYTES','2147483648'),('keep','BACKUP_KEEP_MIN','2')]}
+    if policy['days']<1 or policy['keep']<2 or policy['count']<policy['keep'] or policy['bytes']<1:
+        raise ValueError('Срок хранения должен быть положительным; сохраняется минимум две копии, MAX_COUNT >= KEEP_MIN')
+    return policy
+
+
+def prune_backups(directory,policy=None,now=None):
+    policy=policy or retention_policy();now=time.time() if now is None else now
+    files=[]
+    for path in Path(directory).iterdir():
+        if not re.fullmatch(r'plusfolio-\d{8}T\d{12}Z\.tar\.gz\.age',path.name):continue
+        info=path.lstat()
+        if stat.S_ISREG(info.st_mode):files.append((path,info))
+    files.sort(key=lambda row:row[0].name,reverse=True)
+    keep=files[:policy['keep']];used=sum(info.st_size for _,info in keep);removed=0
+    for path,info in files[policy['keep']:]:
+        if info.st_mtime<now-policy['days']*86400 or len(keep)>=policy['count'] or used+info.st_size>policy['bytes']:
+            path.unlink();removed+=1
+        else:keep.append((path,info));used+=info.st_size
+    for path in Path(directory).iterdir():
+        if re.fullmatch(r'plusfolio-\d{8}T\d{12}Z\.tar\.gz\.partial',path.name):
+            info=path.lstat()
+            if stat.S_ISREG(info.st_mode) and info.st_mtime<now-86400:path.unlink()
+    return {'removed':removed,'kept':len(keep),'bytes':used}
+
+
 def backup():
+    directory=Path('/backups');directory.mkdir(exist_ok=True)
+    policy=retention_policy()
+    with (directory/'.backup.lock').open('a') as lock:
+        try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:
+            print('Backup already running; nothing changed.',flush=True);return None
+        try:os.nice(10)
+        except OSError:pass
+        result=_backup()
+        report=prune_backups(directory,policy)
+        (directory/'last-success').write_text(str(time.time()))
+        print('Backup retention: '+json.dumps(report),flush=True)
+        return result
+
+
+def _backup():
     recipient=os.environ.get('BACKUP_RECIPIENT','')
     if not recipient.startswith('age1'):raise RuntimeError('BACKUP_RECIPIENT is required')
     directory=Path('/backups');directory.mkdir(exist_ok=True)
@@ -49,7 +96,7 @@ def backup():
             with temporary.open('wb') as output:
                 process=subprocess.Popen(['age','--recipient',recipient],stdin=subprocess.PIPE,stdout=output,stderr=subprocess.PIPE)
                 try:
-                    with tarfile.open(fileobj=process.stdin,mode='w|gz') as archive:
+                    with tarfile.open(fileobj=process.stdin,mode='w|gz',compresslevel=1) as archive:
                         for name,path in sorted(paths.items()):
                             reader=HashedReader(path)
                             try:
@@ -62,14 +109,13 @@ def backup():
                 finally:
                     if process.poll() is None:process.kill();process.wait()
             temporary.chmod(0o600);temporary.replace(target)
-            (directory/'last-success').write_text(str(time.time()))
             print('Encrypted backup ready: '+target.name,flush=True)
             return target
         except Exception:
             temporary.unlink(missing_ok=True);raise
 
 
-def verify(path,key,into=None):
+def verify(path,key,into=None,empty_output=False):
     with TemporaryDirectory(prefix='plusfolio-verify-') as scratch:
         tar=Path(scratch)/'decrypted.tar.gz'
         with tar.open('wb') as stream:
@@ -86,8 +132,8 @@ def verify(path,key,into=None):
                 if member.name!='manifest.json' and checksum!=manifest['files'][member.name]:raise ValueError('Checksum mismatch')
             if into:
                 into=Path(into)
-                if into.exists():raise ValueError('Restore destination must not exist')
-                into.mkdir(mode=0o700,parents=True)
+                if into.exists() and (not empty_output or any(into.iterdir())):raise ValueError('Restore destination must not exist or must be an explicitly allowed empty mount')
+                into.mkdir(mode=0o700,parents=True,exist_ok=empty_output)
                 for member in archive.getmembers():
                     target=into/member.name;target.parent.mkdir(parents=True,exist_ok=True,mode=0o755)
                     with archive.extractfile(member) as source,target.open('wb') as destination:
@@ -104,11 +150,15 @@ def verify(path,key,into=None):
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--watch',action='store_true');parser.add_argument('--verify',type=Path);parser.add_argument('--key',type=Path);parser.add_argument('--into',type=Path)
+    parser=argparse.ArgumentParser();parser.add_argument('--watch',action='store_true');parser.add_argument('--verify',type=Path);parser.add_argument('--key',type=Path);parser.add_argument('--into',type=Path);parser.add_argument('--empty-output',action='store_true');parser.add_argument('--prune-only',action='store_true')
     args=parser.parse_args()
-    if args.verify:
+    if args.prune_only:
+        with Path('/backups/.backup.lock').open('a') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX)
+            print(json.dumps(prune_backups(Path('/backups'))))
+    elif args.verify:
         if not args.key:parser.error('--key required')
-        verify(args.verify,args.key,args.into)
+        verify(args.verify,args.key,args.into,args.empty_output)
     else:
         while True:
             try:backup()
