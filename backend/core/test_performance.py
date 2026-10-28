@@ -163,6 +163,15 @@ class SearchSynchronizationBudgetTests(TestCase):
         cls.topics=[Topic(name=f'Topic {n:03}',parent=cls.parent) for n in range(500)]
         Topic.objects.bulk_create(cls.topics)
 
+    def test_material_validation_reads_shared_topic_ancestors_once(self):
+        with CaptureQueriesContext(connection) as queries:
+            problem=s.create_material(self.user,'problem',{
+                'topics':[str(topic.pk) for topic in self.topics[:20]],
+                'statement':'Synthetic condition','solution':'Synthetic solution'})
+        self.assertEqual(problem.topics.count(),20)
+        topic_reads=[query for query in queries if 'FROM "core_topic"' in query['sql']]
+        self.assertLessEqual(len(topic_reads),4)  # Selection, two ancestors, existing links.
+
     def test_large_topic_refresh_is_batched_and_preserves_unchanged_vectors(self):
         import numpy as np
         from .catalogue_search import sync_topics

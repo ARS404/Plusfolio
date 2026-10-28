@@ -111,11 +111,15 @@ def solution_allowed(user, problem, circle=None):
     return problem.pk in visible_solution_ids(user, [problem.pk], circle)
 
 
-def topic_active(topic):
+def topic_active(topic, parents=None):
+    parents = {} if parents is None else parents
     seen=set()
     while topic:
         if topic.pk in seen or topic.archived: return False
-        seen.add(topic.pk);topic=topic.parent
+        seen.add(topic.pk)
+        if topic.parent_id not in parents:
+            parents[topic.parent_id] = topic.parent
+        topic = parents[topic.parent_id]
     return True
 def topic_ids_in_branch(raw):
     if not raw: return None
@@ -175,7 +179,8 @@ def create_material(user,kind,data,*,_document=None,_base=None):
     title=str(data.get('title') or '').strip()
     if len(title)>180 or kind=='worksheet' and not title: raise ValidationError('Укажите название листка, до 180 символов.' if kind=='worksheet' else 'Название задачи — до 180 символов.')
     topics=list(Topic.objects.filter(pk__in=data.get('topics',[])))
-    if not topics or len(topics)!=len(set(data.get('topics',[]))) or any(t.parent_id is None or not topic_active(t) for t in topics): raise ValidationError('Выберите хотя бы одну доступную тему.')
+    parents = {topic.pk: topic for topic in topics}
+    if not topics or len(topics)!=len(set(data.get('topics',[]))) or any(t.parent_id is None or not topic_active(t, parents) for t in topics): raise ValidationError('Выберите хотя бы одну доступную тему.')
     tags=list(Tag.objects.filter(pk__in=data.get('tags',[]),kind=kind,archived=False))
     if len(tags)!=len(set(data.get('tags',[]))): raise ValidationError('Недопустимые теги.')
     model=Problem if kind=='problem' else Worksheet

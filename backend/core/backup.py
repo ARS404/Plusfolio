@@ -63,7 +63,9 @@ def verify_bundle(path,key_path):
             with archive.open(name) as source:
                 if hashlib.file_digest(source,'sha256').hexdigest()!=checksum:raise ValueError('Контрольная сумма не совпала.')
         with TemporaryDirectory() as directory:
-            database=Path(directory)/'verify.sqlite3';database.write_bytes(archive.read('.local/demo.sqlite3'))
+            database=Path(directory)/'verify.sqlite3'
+            with archive.open('.local/demo.sqlite3') as source,database.open('wb') as target:
+                shutil.copyfileobj(source,target,CHUNK_SIZE)
             db=sqlite3.connect(database)
             if db.execute('PRAGMA integrity_check').fetchone()[0]!='ok' or db.execute('PRAGMA foreign_key_check').fetchall():raise ValueError('Нарушена целостность БД.')
             manifest['users']=db.execute('SELECT count(*) FROM core_user').fetchone()[0]

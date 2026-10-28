@@ -9,7 +9,7 @@ from urllib.request import Request
 import numpy as np
 from django.conf import settings
 from django.db import connection, transaction
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 from django.utils import timezone
 from pgvector.django import CosineDistance
 from .models import Problem, ProblemSearchDocument
@@ -138,9 +138,14 @@ def lexical_candidates(docs, text, limit=120):
     for doc in docs.filter(normalized__contains=folded).only(*document_fields(docs))[:limit]:
         exact.append((doc, 1. if normalized(doc.text) == query else .95, 'exact' if normalized(doc.text) == query else 'text'))
     if connection.vendor == 'postgresql':
+        from django.contrib.postgres.lookups import TrigramSimilar
         from django.contrib.postgres.search import TrigramSimilarity
-        candidates = docs.only(*document_fields(docs)).annotate(lexical_score=TrigramSimilarity('normalized', folded)).filter(lexical_score__gte=.08).order_by('-lexical_score')[:limit]
-        return exact + [(doc, float(doc.lexical_score), 'text') for doc in candidates]
+        threshold=.08
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT set_config('pg_trgm.similarity_threshold', %s, true)",[str(threshold)])
+            candidates = docs.filter(TrigramSimilar(F('normalized'),folded)).only(*document_fields(docs)).annotate(lexical_score=TrigramSimilarity('normalized', folded)).filter(lexical_score__gte=threshold).order_by('-lexical_score')[:limit]
+            return exact + [(doc, float(doc.lexical_score), 'text') for doc in candidates]
     # Local SQLite demo: streamed fuzzy scan, bounded result memory.
     query_grams = grams(folded)
     heap = []

@@ -1,5 +1,5 @@
 """Safeguards for shared deployments and retention; no server/database required."""
-import argparse,json,os,socket,subprocess,sys,tempfile,time,unittest
+import argparse,hashlib,io,json,os,socket,subprocess,sys,tarfile,tempfile,time,unittest
 from pathlib import Path
 from unittest.mock import patch,Mock
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'scripts'))
@@ -169,6 +169,52 @@ class RetentionTests(unittest.TestCase):
         with patch('server_backup.Path',side_effect=lambda value: self.directory if value=='/backups' else Path(value)),patch('server_backup._backup',side_effect=RuntimeError('failed')),patch('server_backup.prune_backups') as prune:
             with self.assertRaises(RuntimeError):server_backup.backup()
         prune.assert_not_called()
+
+
+class BackupVerificationTests(unittest.TestCase):
+    def test_checks_all_members_before_creating_restore_directory(self):
+        files={'database.dump':b'synthetic database','source/.deploy/env':b'synthetic configuration'}
+        manifest={'format':'plusfolio-server-v1','created_at':'synthetic','files':{
+            name:hashlib.sha256(data).hexdigest() for name,data in files.items()}}
+        item=('manifest.json',json.dumps(manifest).encode())
+        valid=[*files.items(),item]
+        cases=[
+            ('valid',valid,True),('manifest-first',[item,*files.items()],True),
+            ('duplicate',[*valid,valid[0]],False),
+            ('missing-file',[item],False),('extra-file',[*valid,('extra',b'extra')],False),
+            ('missing-manifest',list(files.items()),False),
+            ('checksum',[('database.dump',b'changed'),valid[1],item],False),
+            ('format',[*files.items(),('manifest.json',json.dumps({**manifest,'format':'wrong'}).encode())],False),
+            ('absolute',[*valid,('/outside',b'bad')],False),
+            ('parent',[*valid,('../outside',b'bad')],False),
+            ('symlink',[*valid,('link',None)],False),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            for label,members,accepted in cases:
+                with self.subTest(label=label):
+                    buffer=io.BytesIO()
+                    with tarfile.open(fileobj=buffer,mode='w:gz') as archive:
+                        for name,data in members:
+                            info=tarfile.TarInfo(name)
+                            if data is None:
+                                info.type=tarfile.SYMTYPE;info.linkname='/outside';archive.addfile(info)
+                            else:
+                                info.size=len(data);archive.addfile(info,io.BytesIO(data))
+                    destination=Path(directory)/label
+                    def decrypt(*args,**kwargs):kwargs['stdout'].write(buffer.getvalue())
+                    with patch('server_backup.subprocess.run',side_effect=decrypt),patch('builtins.print'):
+                        if accepted:
+                            self.assertEqual(server_backup.verify('synthetic.age','synthetic.key',destination),manifest)
+                        else:
+                            with self.assertRaises(ValueError):
+                                server_backup.verify('synthetic.age','synthetic.key',destination)
+                    if accepted:
+                        for name,data in files.items():
+                            path=destination/name
+                            self.assertEqual(path.read_bytes(),data)
+                            self.assertEqual(path.stat().st_mode & 0o777,0o600)
+                        self.assertEqual((destination/'source/.deploy').stat().st_mode & 0o777,0o700)
+                    else:self.assertFalse(destination.exists())
 
 
 if __name__=='__main__':unittest.main()

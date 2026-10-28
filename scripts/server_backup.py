@@ -120,15 +120,16 @@ def verify(path,key,into=None,empty_output=False):
         with tar.open('wb') as stream:
             subprocess.run(['age','--decrypt','--identity',str(key),str(path)],stdout=stream,stderr=subprocess.PIPE,check=True)
         with tarfile.open(tar,'r:gz') as archive:
-            manifest=json.load(archive.extractfile('manifest.json'))
-            if manifest.get('format')!='plusfolio-server-v1':raise ValueError('Unknown backup format')
-            names=archive.getnames()
-            if len(names)!=len(set(names)) or set(names)!=set(manifest['files'])|{'manifest.json'}:raise ValueError('Invalid manifest')
-            for member in archive.getmembers():
+            manifest=None;checksums={}
+            for member in archive:
                 if not member.isfile() or Path(member.name).is_absolute() or '..' in Path(member.name).parts:raise ValueError('Invalid backup member')
                 with archive.extractfile(member) as stream:
-                    checksum=hashlib.file_digest(stream,'sha256').hexdigest()
-                if member.name!='manifest.json' and checksum!=manifest['files'][member.name]:raise ValueError('Checksum mismatch')
+                    if member.name=='manifest.json':manifest=json.load(stream)
+                    else:checksums[member.name]=hashlib.file_digest(stream,'sha256').hexdigest()
+            if manifest is None or manifest.get('format')!='plusfolio-server-v1':raise ValueError('Unknown backup format')
+            names=archive.getnames()
+            if len(names)!=len(set(names)) or set(names)!=set(manifest['files'])|{'manifest.json'}:raise ValueError('Invalid manifest')
+            if checksums!=manifest['files']:raise ValueError('Checksum mismatch')
             if into:
                 into=Path(into)
                 if into.exists() and (not empty_output or any(into.iterdir())):raise ValueError('Restore destination must not exist or must be an explicitly allowed empty mount')

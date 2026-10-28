@@ -96,6 +96,16 @@ class SearchTests(TestCase):
                     self.assertTrue({'embedding','normalized'}<=doc.get_deferred_fields())
                     self.assertEqual((doc.problem_id,doc.kind,doc.text),(self.problem.pk,'statement',text))
 
+    @skipUnless(connection.vendor=='postgresql','PostgreSQL trigram threshold')
+    def test_postgres_fuzzy_search_keeps_matches_below_the_default_threshold(self):
+        from .search import lexical_candidates
+        docs=ProblemSearchDocument.objects.filter(problem=self.problem,kind='statement')
+        text='alpha beta gamma delta epsilon zeta eta theta iota kappa lambda'
+        docs.update(text=text,normalized=normalized(text).casefold())
+        matches=lexical_candidates(docs,'alpha beta other')
+        self.assertEqual([(doc.pk,kind) for doc,score,kind in matches],[(docs.get().pk,'text')])
+        self.assertTrue(.08<=matches[0][1]<.3)
+
     @patch('core.search.embed')
     def test_index_worker_reads_only_source_and_fingerprint_without_deferred_queries(self,embed):
         from .search import index_documents
