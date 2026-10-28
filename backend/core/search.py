@@ -93,7 +93,7 @@ def query_embedding(text):
 def index_documents(queryset, batch_size=8):
     now = timezone.now()
     docs = list(queryset.filter(Q(embedding__isnull=True) | ~Q(model=MODEL_ID))
-        .filter(Q(retry_at=None) | Q(retry_at__lte=now)).order_by('pk')[:batch_size])
+        .filter(Q(retry_at=None) | Q(retry_at__lte=now)).only('id','text','fingerprint').order_by('pk')[:batch_size])
     if not docs:return 0
     try:vectors = embed([doc.text for doc in docs], 'document')
     except EmbeddingUnavailable:
@@ -139,7 +139,7 @@ def lexical_candidates(docs, text, limit=120):
         exact.append((doc, 1. if normalized(doc.text) == query else .95, 'exact' if normalized(doc.text) == query else 'text'))
     if connection.vendor == 'postgresql':
         from django.contrib.postgres.search import TrigramSimilarity
-        candidates = docs.annotate(lexical_score=TrigramSimilarity('normalized', folded)).filter(lexical_score__gte=.08).order_by('-lexical_score')[:limit]
+        candidates = docs.only(*document_fields(docs)).annotate(lexical_score=TrigramSimilarity('normalized', folded)).filter(lexical_score__gte=.08).order_by('-lexical_score')[:limit]
         return exact + [(doc, float(doc.lexical_score), 'text') for doc in candidates]
     # Local SQLite demo: streamed fuzzy scan, bounded result memory.
     query_grams = grams(folded)
@@ -164,7 +164,7 @@ def vector_candidates(docs, vector, limit=120):
         with transaction.atomic():
             with connection.cursor() as cursor:
                 cursor.execute("SET LOCAL hnsw.iterative_scan = 'strict_order'")
-            return [(doc, 1 - float(doc.distance)) for doc in docs.annotate(distance=CosineDistance('embedding', vector))
+            return [(doc, 1 - float(doc.distance)) for doc in docs.only(*document_fields(docs)).annotate(distance=CosineDistance('embedding', vector))
                     .order_by('distance')[:limit]]
     # SQLite has no vector operators. Evaluate blocks on CPU without retaining the full bank.
     heap, batch = [], []

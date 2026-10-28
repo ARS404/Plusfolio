@@ -1,8 +1,11 @@
+from unittest import skipUnless
 from unittest.mock import patch
 import numpy as np
 from django.core.cache import cache
 from django.core.management import call_command
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 from .models import User, Problem, ProblemSearchDocument, Circle, Discussion
 from . import services as s
@@ -76,6 +79,60 @@ class SearchTests(TestCase):
         self.assertEqual(response.data['results'][0]['match'],'semantic')
         self.assertEqual(response.data['results'][0]['problem']['id'],str(self.problem.pk))
         self.assertEqual(response.data['results'][0]['fields'],['statement'])
+
+    @skipUnless(connection.vendor=='postgresql','PostgreSQL candidate projection')
+    def test_postgres_fuzzy_candidates_leave_vectors_and_normalized_text_deferred(self):
+        from .search import lexical_candidates
+        docs=ProblemSearchDocument.objects.filter(problem=self.problem,kind='statement')
+        vector=np.zeros(384,dtype=np.float32);vector[0]=1
+        text='Synthetic projection condition'
+        docs.update(text=text,normalized=normalized(text).casefold(),embedding=vector,model=MODEL_ID)
+        # The typo prevents the exact-substring branch from hiding a fuzzy projection regression.
+        with self.assertNumQueries(2):
+            candidates=lexical_candidates(docs,'synthetic projection conditon')
+        self.assertEqual(len(candidates),1)
+        with self.assertNumQueries(0):
+            for doc,score,kind in candidates:
+                self.assertTrue({'embedding','normalized'}<=doc.get_deferred_fields())
+                self.assertEqual((doc.problem_id,doc.kind,doc.text),(self.problem.pk,'statement',text))
+                self.assertEqual(kind,'text');self.assertGreaterEqual(score,.08)
+
+    @skipUnless(connection.vendor=='postgresql','PostgreSQL candidate projection')
+    def test_postgres_vector_candidates_do_not_fetch_the_vector_or_normalized_text(self):
+        from .search import vector_candidates
+        docs=ProblemSearchDocument.objects.filter(problem=self.problem,kind='statement')
+        vector=np.zeros(384,dtype=np.float32);vector[0]=1
+        docs.update(embedding=vector,model=MODEL_ID)
+        with CaptureQueriesContext(connection) as queries:
+            candidates=vector_candidates(docs,vector,limit=1)
+        self.assertEqual(sum(query['sql'].lstrip().upper().startswith('SELECT ') for query in queries),1)
+        self.assertEqual(len(candidates),1)
+        with self.assertNumQueries(0):
+            doc,score=candidates[0]
+            self.assertTrue({'embedding','normalized'}<=doc.get_deferred_fields())
+            self.assertEqual((doc.problem_id,doc.kind),(self.problem.pk,'statement'))
+            self.assertTrue(doc.text);self.assertAlmostEqual(score,1.)
+
+    @patch('core.search.embed')
+    def test_index_worker_reads_only_source_and_fingerprint_without_deferred_queries(self,embed):
+        from .search import index_documents
+        docs=ProblemSearchDocument.objects.filter(problem=self.problem,kind='statement')
+        document=docs.get()
+        vector=np.zeros(384,dtype=np.float32);vector[0]=1
+        docs.update(embedding=vector,model='obsolete-test-model')
+        embed.return_value=vector[None,:]
+        with CaptureQueriesContext(connection) as queries:
+            self.assertEqual(index_documents(docs,batch_size=1),1)
+        reads=[query['sql'] for query in queries if query['sql'].lstrip().upper().startswith('SELECT ')]
+        self.assertEqual(len(reads),1)
+        self.assertEqual(len(queries),2)  # One source read and one guarded update.
+        projection=reads[0].split(' FROM ',1)[0]
+        for field in ['embedding','normalized']:
+            self.assertNotIn('."'+field+'"',projection)
+        embed.assert_called_once_with([document.text],'document')
+        document.refresh_from_db()
+        self.assertEqual(document.model,MODEL_ID)
+        np.testing.assert_array_equal(np.asarray(document.embedding),vector)
 
     def test_bulk_recovery_and_idempotence(self):
         ProblemSearchDocument.objects.filter(problem=self.problem).delete()

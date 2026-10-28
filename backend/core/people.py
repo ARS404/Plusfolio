@@ -1,5 +1,6 @@
 """Student identity validation and portable, Unicode-aware people searches."""
 import unicodedata
+from collections.abc import Iterable
 from django.core.exceptions import ValidationError
 from django.db.models import Q
 
@@ -8,10 +9,12 @@ def normalize_name(value):
     return ' '.join(unicodedata.normalize('NFKC',str(value)).casefold().replace('ё','е').split())
 
 
-def role_query(roles,prefix=''):
-    query=Q(pk__in=[])
+def role_query(roles: Iterable[str], prefix: str = '') -> Q:
+    from .models import ROLES
+    query = Q(pk__in=[])
     for role in roles:
-        for index in range(4):query|=Q(**{f'{prefix}roles__{index}':role})
+        for index in range(len(ROLES)):
+            query |= Q(**{f'{prefix}roles__{index}': role})
     return query
 
 

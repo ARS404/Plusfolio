@@ -154,6 +154,20 @@ class DomainTests(TestCase):
         credentials={'email':self.teacher.email,'password':'PlusfolioDemo2026!'}
         self.assertEqual(client.post('/api/login',credentials,content_type='application/json').status_code,403)
         self.assertEqual(client.post('/api/login',credentials,content_type='application/json',HTTP_X_CSRFTOKEN=client.cookies['csrftoken'].value).status_code,200)
+    def test_last_admin_guard_ignores_inactive_admins_and_preserves_multi_role_admin(self):
+        backup=User.objects.create_user('backup-admin@example.test','unused',roles=['analyst','admin'],is_active=False)
+        client=self.client_for(self.admin)
+        response=client.patch('/api/users',{'id':self.admin.pk,'roles':['teacher']},format='json')
+        self.assertEqual(response.status_code,400)
+        self.admin.refresh_from_db();self.assertIn('admin',self.admin.roles)
+        backup.is_active=True;backup.save(update_fields=['is_active'])
+        response=client.patch('/api/users',{'id':self.admin.pk,'roles':['teacher']},format='json')
+        self.assertEqual(response.status_code,200)
+        self.admin.refresh_from_db();self.assertEqual(self.admin.roles,['teacher'])
+        response=self.client_for(backup).patch('/api/users',{'id':backup.pk,'roles':['analyst']},format='json')
+        self.assertEqual(response.status_code,400)
+        backup.refresh_from_db();self.assertIn('admin',backup.roles)
+
     def test_teacher_cannot_administer_roles(self):
         self.assertEqual(self.client_for(self.teacher).patch('/api/users',{'id':self.student.pk,'roles':['admin']},format='json').status_code,403)
     def test_solution_not_in_student_material_responses(self):

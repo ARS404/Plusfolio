@@ -86,6 +86,53 @@ class HostTests(unittest.TestCase):
             self.assertFalse(server.STATE.exists())
 
 
+class EnvCodecTests(unittest.TestCase):
+    def test_roundtrip_quotes_unicode_newlines_equals_and_comments(self):
+        with tempfile.TemporaryDirectory() as temporary,patch.object(server,'STATE',Path(temporary)):
+            values={'TITLE':'Кружок «Числа»','QUOTES':'"quoted" и \\ slash','LINES':'первая\nвторая',
+                    'EQUALS':'left=right#text','EMPTY':'','PORT':18080}
+            server.write_env(values)
+            target=server.STATE/'env'
+            written=target.read_text()
+            self.assertEqual([line.split('=',1)[0] for line in written.splitlines()],sorted(values))
+            self.assertEqual(target.stat().st_mode & 0o777,0o444)
+            target.chmod(0o600);target.write_text('# comment\n\n'+written+'\n# trailing comment\n');target.chmod(0o444)
+            self.assertEqual(server.read_env(),{key:str(value) for key,value in values.items()})
+            server.write_env({'REPLACED':'новое значение'})
+            self.assertEqual(server.read_env(),{'REPLACED':'новое значение'})
+            self.assertEqual(target.stat().st_mode & 0o777,0o444)
+            target.chmod(0o600);target.write_text('NUMBER=42\nFLAG=true\nNOTHING=null\n');target.chmod(0o444)
+            self.assertEqual(server.read_env(),{'NUMBER':42,'FLAG':True,'NOTHING':None})
+
+    def test_restore_uses_explicit_env_path_without_changing_working_configuration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);working=root/'working';working.mkdir();destination=root/'restored'
+            key=root/'backup.key';key.write_text('synthetic-key');key.chmod(0o600)
+            original={'COMPOSE_PROJECT_NAME':'plusfolio-working','INSTANCE_ID':'working-instance'}
+            source={'COMPOSE_PROJECT_NAME':'plusfolio-source','INSTANCE_ID':'source-instance'}
+            def extract(*args,**kwargs):
+                deployment=destination/'source/.deploy';(deployment/'secrets').mkdir(parents=True)
+                config=deployment/'env'
+                config.write_text('# synthetic archive configuration\n'+''.join(name+'='+json.dumps(value)+'\n' for name,value in source.items()))
+                config.chmod(0o444)
+                (deployment/'secrets/app_key').write_text('synthetic-app-key')
+            with patch.object(server,'STATE',working),patch('server.docker',side_effect=extract),patch('builtins.print'):
+                server.write_env(original)
+                before=(working/'env').read_bytes()
+                args=argparse.Namespace(command='restore-backup',file=str(root/'backup.age'),key=str(key),into=str(destination),image='synthetic-image')
+                server.operate(args,{})
+                config=destination/'source/.deploy/env';restored=server.read_env(config)
+                self.assertTrue(restored['COMPOSE_PROJECT_NAME'].startswith('plusfolio-restored-'))
+                self.assertNotEqual(restored['INSTANCE_ID'],source['INSTANCE_ID'])
+                self.assertEqual(restored['DEPLOYMENT_MODE'],'shared')
+                self.assertEqual(config.stat().st_mode & 0o777,0o444)
+                self.assertEqual((working/'env').read_bytes(),before)
+                self.assertEqual(server.read_env(),original)
+                self.assertEqual((working/'env').stat().st_mode & 0o777,0o444)
+                self.assertEqual((config.parent/'backup.key').read_text(),'synthetic-key')
+                self.assertEqual((config.parent/'backup.key').stat().st_mode & 0o777,0o600)
+
+
 class RetentionTests(unittest.TestCase):
     def setUp(self):
         self.temporary=tempfile.TemporaryDirectory();self.addCleanup(self.temporary.cleanup)

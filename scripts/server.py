@@ -4,6 +4,7 @@ import argparse,getpass,hashlib,json,os,re,secrets,subprocess,sys,time,urllib.pa
 import server_host
 from email.utils import parseaddr
 from pathlib import Path
+from collections.abc import Mapping
 ROOT=Path(__file__).resolve().parents[1]
 STATE=ROOT/'.deploy'
 
@@ -25,14 +26,16 @@ def compose(*args,**kwargs):
     kwargs.setdefault('env',{**os.environ,**{key:str(value) for key,value in values.items()}})
     return subprocess.run(['docker','compose','--project-name',values['COMPOSE_PROJECT_NAME'],'--env-file',str(STATE/'env'),'-f',str(ROOT/'compose.yml'),*args],cwd=ROOT,check=True,**kwargs)
 
-def write_env(values):
-    if (STATE/'env').exists():(STATE/'env').chmod(0o600)
-    (STATE/'env').write_text(''.join(key+'='+json.dumps(str(value),ensure_ascii=False)+'\n' for key,value in sorted(values.items())))
-    (STATE/'env').chmod(0o444)
+def write_env(values: Mapping[str, object], path: Path | None = None) -> None:
+    target = STATE/'env' if path is None else path
+    if target.exists():target.chmod(0o600)
+    target.write_text(''.join(key+'='+json.dumps(str(value),ensure_ascii=False)+'\n' for key,value in sorted(values.items())))
+    target.chmod(0o444)
 
-def read_env():
-    values={}
-    for line in (STATE/'env').read_text().splitlines():
+def read_env(path: Path | None = None) -> dict[str, object]:
+    target = STATE/'env' if path is None else path
+    values: dict[str, object] = {}
+    for line in target.read_text().splitlines():
         if line and not line.startswith('#'):
             key,value=line.split('=',1);values[key]=json.loads(value)
     return values
@@ -215,13 +218,11 @@ def operate(args,values):
             getattr(args,'image',None) or values.get('PLUSFOLIO_APP_IMAGE','plusfolio-app:local'),'python','scripts/server_backup.py','--verify','/backup.age','--key','/backup.key','--into','/output','--empty-output')
         import shutil
         config=destination/'source/.deploy/env'
-        restored={name:json.loads(value) for name,value in (line.split('=',1) for line in config.read_text().splitlines() if line)}
+        restored=read_env(config)
         restored['COMPOSE_PROJECT_NAME']='plusfolio-restored-'+str(time.time_ns())
         restored['INSTANCE_ID']=secrets.token_hex(16)
         restored=server_host.shared_values(restored,legacy=restored.get('DEPLOYMENT_MODE')!='shared')
-        config.chmod(0o600)
-        config.write_text(''.join(name+'='+json.dumps(str(value),ensure_ascii=False)+'\n' for name,value in sorted(restored.items())))
-        config.chmod(0o444)
+        write_env(restored,config)
         for secret in (destination/'source/.deploy/secrets').iterdir():secret.chmod(0o444)
         shutil.copyfile(key,destination/'source/.deploy/backup.key');(destination/'source/.deploy/backup.key').chmod(0o600)
         print('Verified sources and database restored into '+str(destination))

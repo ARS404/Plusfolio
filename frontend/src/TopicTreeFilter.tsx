@@ -1,10 +1,10 @@
 import EntityId from './EntityId';
 import {useCatalogueSearch,CatalogueSearchStatus} from './useCatalogueSearch';
 import {matchesEntity} from './entitySearch';
+import type {Topic} from './topicPaths';
 import React,{useEffect,useId,useMemo,useRef,useState} from 'react';
 import {ChevronDown,ChevronRight,FolderTree,Search,X} from 'lucide-react';
 
-type Topic={id:string;public_id?:string;name:string;parent_id:string|null;is_other:boolean;archived:boolean;sort_order:number};
 type Props={topics:Topic[];value:string[];onChange:(value:string[])=>void;label?:string};
 
 export default function TopicTreeFilter({topics,value,onChange,label='Темы задач'}:Props){

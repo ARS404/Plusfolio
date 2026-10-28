@@ -444,11 +444,15 @@ def mailbox(request):
 
 @api_view(['GET','PATCH'])
 def users(request):
+    from .people import filter_users, role_query
     s.require(s.admin(request.user))
     if request.method=='PATCH':
         account=User.objects.get(pk=request.data.get('id'));roles=request.data.get('roles',[])
         if not roles or not set(roles)<=ROLES:raise DjangoValidationError('Выберите допустимые роли.')
-        if 'admin' in account.roles and 'admin' not in roles and sum('admin' in u.roles for u in User.objects.filter(is_active=True))<=1:raise DjangoValidationError('Нельзя убрать последнего администратора.')
+        if 'admin' in account.roles and 'admin' not in roles:
+            active_admins = User.objects.filter(is_active=True).filter(role_query(['admin'])).count()
+            if active_admins <= 1:
+                raise DjangoValidationError('Нельзя убрать последнего администратора.')
         with transaction.atomic():
             account.roles=roles;account.save();s.profiles(account)
             grantids=request.data.get('tags',[]);grants=Tag.objects.filter(pk__in=grantids,kind='circle',archived=False)
@@ -459,7 +463,6 @@ def users(request):
             if 'teacher' not in roles:CircleTeacher.objects.filter(teacher__user=account,ended_at=None).update(ended_at=timezone.now())
             if 'student' not in roles:Enrollment.objects.filter(student__user=account,left_at=None).update(left_at=timezone.now())
             s.audit(request.user,'user.roles',{'user':account.pk,'roles':roles})
-    from .people import filter_users
     qs=filter_users(User.objects.select_related('student','teacher').prefetch_related('analystgrant_set'),request.query_params).order_by('name_search','pk')
     meta=request.method=='GET' and request.query_params.get('meta')=='1'
     page=int(request.query_params.get('page','1')) if meta else 1
