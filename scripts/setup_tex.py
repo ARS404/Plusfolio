@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Install pinned official Tectonic and warm trusted template/TikZ resources, never user data."""
-import hashlib,io,json,os,platform,shutil,subprocess,sys,tarfile,tempfile,time,urllib.request
+import hashlib, io, json, os, platform, shutil, subprocess, tarfile, tempfile, time
 from pathlib import Path
 from download_asset import download
 ROOT=Path(__file__).resolve().parents[1]

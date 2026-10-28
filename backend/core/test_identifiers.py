@@ -5,7 +5,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 from . import services as s
 from .identifiers import typed_id
-from .models import User,Student,Teacher,Circle,Topic,WorksheetDocument,Problem,Tag,Invitation,Enrollment
+from .models import User, Student, Circle, Topic, WorksheetDocument, Problem, Tag, Enrollment
 
 class IdentifierParsingTests(SimpleTestCase):
     def test_case_whitespace_zero_padding_and_overflow(self):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Single-job compiler in a read-only, networkless container; no application secrets."""
-import base64,json,os,re,signal,socket,socketserver,subprocess,sys,threading
+import base64, json, os, re, signal, socketserver, subprocess, sys, threading
 from pathlib import Path
 from tempfile import TemporaryDirectory
 ROOT=Path(__file__).resolve().parents[1]

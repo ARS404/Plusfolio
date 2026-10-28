@@ -1,10 +1,16 @@
 from datetime import timedelta
+from unittest import skipUnless
+from django.db import connection
 from django.test import TestCase,Client,override_settings
 from django.core.management import call_command
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from rest_framework.test import APIClient
-from .models import *
+from .models import (
+    AnalystGrant, Assignment, AuditEvent, Circle, Discussion, EmailOutbox,
+    Enrollment, Invitation, Problem, Solve, Student, Tag, Topic,
+    TopicCatalogVersion, User, Worksheet, WorksheetIssue, WorksheetItem,
+)
 from . import services as s
 
 @override_settings(AUTH_PASSWORD_VALIDATORS=[],PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
@@ -1088,7 +1094,7 @@ class DomainTests(TestCase):
             self.assertEqual(client.get(f'/api/circles/{self.circle.pk}/issues/{self.issue.pk}/pdf').status_code,404)
 
     def test_plain_fallback_escapes_tex_and_optional_sources_are_immutable(self):
-        from .documents import fragment,project_for
+        from .documents import fragment
         from types import SimpleNamespace
         item=SimpleNamespace(statement='100% #1 & 2_3 $x^2$ '+r'\input{secret}',statement_tex='')
         text=fragment(item,'statement')
@@ -1251,6 +1257,7 @@ class SchoolGradeTests(SimpleTestCase):
 
 from django.test import TransactionTestCase
 
+@skipUnless(connection.vendor=='sqlite','Local demo backup format requires SQLite')
 class BackupRuntimeTests(TransactionTestCase):
     def test_backup_restores_offline_tex_runtime_but_not_derived_pdf_cache(self):
         from tempfile import TemporaryDirectory

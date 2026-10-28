@@ -10,15 +10,14 @@ from django.middleware.csrf import get_token
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_protect,ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
-from rest_framework.decorators import api_view,permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception
 from .models import *
 from . import services as s
 from . import filters as f
 from . import queries as read
-from .identifiers import public_id,search_entities,search_issues
+from .identifiers import public_id, search_entities
 
 def exception_handler(exc,context):
     if isinstance(exc,s.Conflict): return Response({'detail':str(exc)},status=409)

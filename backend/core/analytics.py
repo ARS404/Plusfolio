@@ -87,7 +87,7 @@ def report(user, params):
     rows.sort(key=lambda row: (row['percent'], -row['recipients'], row['title']))
 
     worksheet_rows = []
-    for worksheet in Worksheet.objects.filter(pk__in=worksheet_ids).select_related('document').order_by('title'):
+    for worksheet in Worksheet.objects.filter(pk__in=worksheet_ids).select_related('document').only('id','title','document__number').order_by('title'):
         wid = worksheet.pk; recipients = worksheet_students[wid]; pids = selected_by_worksheet[wid]
         assigned = len(recipients)*len(pids)
         solved_count = sum((sid, pid) in solved_states for sid in recipients for pid in pids)
@@ -103,7 +103,7 @@ def report(user, params):
     percentages = []
     distribution = [{'label': label, 'count': 0} for label in ['0%', '<25%', '25–<50%', '50–<75%', '75–<100%', '100%']]
     students_completed = students_with_solves = 0
-    for student in Student.objects.filter(pk__in=student_ids).select_related('user').order_by('user__name'):
+    for student in Student.objects.filter(pk__in=student_ids).select_related('user').only('id','graduation_year','user__id','user__name').order_by('user__name'):
         assigned = len(student_problems[student.pk]); count = len(student_solved[student.pk])
         raw = 100*count/assigned
         percentages.append(raw); students_with_solves += bool(count); students_completed += count == assigned
@@ -149,7 +149,7 @@ def report(user, params):
     if group_ids:
         discussion_states = { (state.circle_id, state.problem_id): state for state in Discussion.objects.filter(circle_id__in=group_ids, problem_id__in=selected_ids) }
         denominator = discussed = visible = 0
-        for circle in Circle.objects.filter(pk__in=group_ids & circle_ids).order_by('name'):
+        for circle in Circle.objects.filter(pk__in=group_ids & circle_ids).only('id','number','name','city','archived').order_by('name'):
             cpairs = circle_pairs[circle.pk]; pids = circle_problem_ids[circle.pk]
             done = len(cpairs & solved_states)
             covered = sum(bool(discussion_states.get((circle.pk, pid)) and discussion_states[circle.pk, pid].discussed) for pid in pids)

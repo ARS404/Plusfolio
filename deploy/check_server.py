@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Run from a clean checkout: build/start/test a disposable server stack."""
-import argparse,json,os,subprocess,sys,time,urllib.request,hashlib
+import argparse, json, subprocess, sys, time, urllib.request, hashlib
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'scripts'))
 import server

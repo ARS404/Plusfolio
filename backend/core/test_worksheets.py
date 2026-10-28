@@ -4,7 +4,7 @@ from django.test import TestCase,override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 from . import services as s
-from .models import User,Circle,Worksheet,WorksheetDocument,Assignment,Problem,Topic,Tag,Discussion,Enrollment
+from .models import User, Circle, Worksheet, WorksheetDocument, Assignment, Topic, Tag, Discussion, Enrollment
 from .worksheets import publish
 
 

@@ -18,7 +18,7 @@ statements, solutions, counts of tasks, or personal data are collected.
 from __future__ import annotations
 import argparse
 import ast
-from collections import defaultdict, deque
+from collections import deque
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 import json

@@ -1,9 +1,8 @@
-import json,smtplib
+import smtplib
 from unittest.mock import patch
 from datetime import timedelta
 from django.test import TestCase,override_settings
 from django.core import mail
-from django.core.management import call_command
 from django.utils import timezone
 from .models import User,Circle,EmailOutbox
 from . import services as s

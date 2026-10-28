@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import urllib.request
 import sys
 helpers=Path(__file__).resolve().parents[1]/'scripts'
 if helpers.is_dir():sys.path.insert(0,str(helpers))

@@ -1,8 +1,8 @@
 """Derived metadata index. Primary querysets decide access before retrieval."""
-import hashlib
-from django.db.models import Q
+
 from .models import CatalogueSearchDocument, Circle, Worksheet, Topic
-from .search import normalized, rank_documents, index_documents, EmbeddingUnavailable, MODEL_ID
+from .search import rank_documents, index_documents
+from .search_index import text_fields, sync_documents
 
 MODELS={'circle':Circle,'worksheet':Worksheet,'topic':Topic}
 
@@ -20,27 +20,29 @@ def topic_paths():
     return paths
 
 
-def sync_entity(instance, paths=None):
+def sync_entities(kind,rows,paths=None):
+    if kind=='topic' and paths is None:paths=topic_paths()
+    def entries():
+        for row in rows:
+            if kind=='topic':text=paths.get(row.pk,'')
+            elif kind=='circle':text='\n'.join([row.name,row.description,row.city,row.region])
+            else:text='\n'.join([row.title,row.description])
+            yield {'kind':kind,'object_id':row.pk,**text_fields(text)}
+    sync_documents(CatalogueSearchDocument,entries(),'object_id')
+
+
+def sync_entity(instance,paths=None):
     kind=next((key for key,model in MODELS.items() if isinstance(instance,model)),None)
     if not kind:return
     if kind=='worksheet' and not instance.published:
         CatalogueSearchDocument.objects.filter(kind=kind,object_id=instance.pk).delete();return
-    if kind=='topic':
-        text=(paths if paths is not None else topic_paths()).get(instance.pk,'')
-    elif kind=='circle':text='\n'.join([instance.name,instance.description,instance.city,instance.region])
-    else:text='\n'.join([instance.title,instance.description])
-    text=text.strip();fingerprint=hashlib.sha256(normalized(text).encode()).hexdigest()
-    doc,created=CatalogueSearchDocument.objects.get_or_create(kind=kind,object_id=instance.pk,
-        defaults={'text':text,'normalized':normalized(text).casefold(),'fingerprint':fingerprint})
-    if not created and doc.fingerprint!=fingerprint:
-        CatalogueSearchDocument.objects.filter(pk=doc.pk).update(text=text,normalized=normalized(text).casefold(),
-            fingerprint=fingerprint,embedding=None,model='',retry_at=None)
+    sync_entities(kind,[instance],paths)
 
 
 def sync_topics():
-    # Renaming or moving a parent changes every descendant's indexed path.
+    # Parent edits change descendant paths; unchanged vectors survive the batch.
     paths=topic_paths()
-    for row in Topic.objects.all().iterator(chunk_size=200):sync_entity(row,paths)
+    sync_entities('topic',Topic.objects.only('id').iterator(chunk_size=100),paths)
 
 
 def reconcile(rebuild=False):
@@ -49,8 +51,8 @@ def reconcile(rebuild=False):
         if kind=='worksheet':rows=rows.filter(published=True)
         CatalogueSearchDocument.objects.filter(kind=kind).exclude(object_id__in=rows.values('pk')).delete()
         if not rebuild:rows=rows.exclude(pk__in=CatalogueSearchDocument.objects.filter(kind=kind).values('object_id'))
-        paths=topic_paths() if kind=='topic' else None
-        for row in rows.iterator(chunk_size=100):sync_entity(row,paths)
+        fields={'topic':['id'],'circle':['id','name','description','city','region'],'worksheet':['id','title','description']}[kind]
+        sync_entities(kind,rows.only(*fields).iterator(chunk_size=100))
 
 
 def index_batch(batch_size=8):

@@ -9,7 +9,7 @@ from rest_framework.test import APIClient
 
 from .api_contract import operations_for
 from .api_reference import schema_for
-from .api_shapes import SCHEMAS
+
 from .models import Circle, User
 
 

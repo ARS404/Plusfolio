@@ -4,7 +4,7 @@ from django.core.cache import cache
 from django.test import TestCase,override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
-from .models import User,Topic,Circle,CircleTeacher,Teacher,Enrollment,Student,Problem,Worksheet,WorksheetDocument,CatalogueSearchDocument,ProblemSearchDocument
+from .models import User, Topic, Circle, CircleTeacher, Teacher, Enrollment, Student, Problem, Worksheet, WorksheetDocument, CatalogueSearchDocument
 from . import catalogue_search as search
 from .search import MODEL_ID,EmbeddingUnavailable
 

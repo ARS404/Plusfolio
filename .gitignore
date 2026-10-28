@@ -233,3 +233,4 @@ frontend/dist/
 *.key
 *.pem
 *.sqlite3*
+*.pfb

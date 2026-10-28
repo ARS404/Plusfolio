@@ -163,7 +163,7 @@ class ProblemNumber(models.Model):
 
 class Problem(PublishedMaterial):
     class Meta:
-        indexes=[models.Index(fields=['-created_at'],condition=models.Q(published=True),name='problem_published_recent')]
+        indexes=[models.Index(fields=['-created_at','-id'],condition=models.Q(published=True),name='problem_published_order')]
         constraints=[models.UniqueConstraint(fields=['source','source_id'],condition=~models.Q(source='')&~models.Q(source_id=''),name='unique_external_problem')]
     title=models.CharField(max_length=180,blank=True,default='')
     number=models.OneToOneField(ProblemNumber,on_delete=models.PROTECT,editable=False,related_name='problem')
@@ -237,7 +237,7 @@ class CatalogueSearchDocument(models.Model):
 
 class Worksheet(PublishedMaterial):
     class Meta:
-        indexes=[models.Index(fields=['-created_at'],condition=models.Q(published=True),name='worksheet_published_recent')]
+        indexes=[models.Index(fields=['-created_at','-id'],condition=models.Q(published=True),name='worksheet_published_order')]
         constraints=[models.UniqueConstraint(fields=['document','revision'],name='unique_worksheet_revision')]
     document=models.ForeignKey(WorksheetDocument,on_delete=models.PROTECT,related_name='revisions')
     revision=models.PositiveIntegerField(default=1)

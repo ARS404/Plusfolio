@@ -1,6 +1,5 @@
 """Validate and import an immutable, attributable problems.ru sample by source IDs."""
-import hashlib,json,re,uuid
-from pathlib import Path
+import hashlib, re, uuid
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from .models import Problem,Topic,TopicCatalogVersion

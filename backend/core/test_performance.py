@@ -1,6 +1,7 @@
 """Read budgets and large-history writes must stay bounded as demo datasets grow."""
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import skipUnless
 from unittest.mock import patch
 from django.core.management import call_command
 from django.db import connection
@@ -8,8 +9,7 @@ from django.test import TestCase,TransactionTestCase,override_settings
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 from . import services as s
-from .models import (User,Student,Circle,CircleTeacher,Enrollment,Problem,Worksheet,
-                     WorksheetItem,WorksheetIssue,WorksheetDocument,Assignment,Topic,Tag)
+from .models import User, Circle, CircleTeacher, Enrollment, Problem, Worksheet, WorksheetItem, WorksheetIssue, WorksheetDocument, Assignment, Topic, Tag
 
 
 @override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
@@ -80,6 +80,7 @@ class QueryBudgetTests(TestCase):
         self.assertEqual(dict(Assignment.objects.filter(student=pupil.student).values_list('pk','assigned_at')),before)
 
 
+@skipUnless(connection.vendor=='sqlite','Local demo backup format requires SQLite')
 class StreamingBackupTests(TransactionTestCase):
     def test_full_bundle_streams_large_files_and_excludes_dependency_trees(self):
         from .backup import create_bundle,restore_bundle
@@ -98,3 +99,52 @@ class StreamingBackupTests(TransactionTestCase):
                 self.assertEqual(set(manifest['files']),{'.local/demo.sqlite3','.local/app.key','.local/tools/tectonic','large.bin'})
                 restore_bundle(bundle,local/'backup.key',Path(directory)/'restored')
             self.assertEqual((Path(directory)/'restored/large.bin').read_bytes(),source.read_bytes())
+
+
+class SearchSynchronizationBudgetTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user=User.objects.create_user('index-budget@example.test','unused',name='Index budget',roles=['admin'])
+        cls.root=Topic.objects.create(name='Root')
+        cls.parent=Topic.objects.create(name='Algebra',parent=cls.root)
+        cls.topics=[Topic(name=f'Topic {n:03}',parent=cls.parent) for n in range(500)]
+        Topic.objects.bulk_create(cls.topics)
+
+    def test_large_topic_refresh_is_batched_and_preserves_unchanged_vectors(self):
+        import numpy as np
+        from .catalogue_search import sync_topics
+        from .models import CatalogueSearchDocument
+        from .search import MODEL_ID
+        sync_topics()
+        vector=np.zeros(384,dtype=np.float32);vector[0]=1
+        CatalogueSearchDocument.objects.filter(kind='topic',object_id=self.topics[0].pk).update(embedding=vector,model=MODEL_ID)
+        with CaptureQueriesContext(connection) as queries:sync_topics()
+        self.assertLessEqual(len(queries),25)
+        doc=CatalogueSearchDocument.objects.get(kind='topic',object_id=self.topics[0].pk)
+        self.assertEqual(doc.model,MODEL_ID);self.assertEqual(np.asarray(doc.embedding).tolist(),vector.tolist())
+        Topic.objects.filter(pk=self.parent.pk).update(name='Renamed algebra')
+        with CaptureQueriesContext(connection) as queries:sync_topics()
+        self.assertLessEqual(len(queries),40)
+        doc.refresh_from_db();self.assertIsNone(doc.embedding);self.assertEqual(doc.model,'')
+        self.assertEqual(doc.text,'Renamed algebra / Topic 000')
+
+    def test_bulk_problem_import_is_reconciled_with_bounded_queries(self):
+        from .models import ProblemSearchDocument
+        from .search import reconcile_missing
+        problems=[Problem(author=self.user,published=True,statement=f'Condition {n}',solution='Solution') for n in range(150)]
+        Problem.objects.bulk_create(problems)
+        with CaptureQueriesContext(connection) as queries:reconcile_missing()
+        self.assertLessEqual(len(queries),40)
+        self.assertEqual(ProblemSearchDocument.objects.filter(problem__in=problems).count(),450)
+        reconcile_missing()
+        self.assertEqual(ProblemSearchDocument.objects.filter(problem__in=problems).count(),450)
+
+    def test_recent_material_indexes_match_the_stable_pagination_order(self):
+        from django.db import models
+        for model,name in [(Problem,'problem_published_order'),(Worksheet,'worksheet_published_order')]:
+            index=next(index for index in model._meta.indexes if index.name==name)
+            self.assertEqual(index.fields,['-created_at','-id'])
+            self.assertEqual(index.condition,models.Q(published=True))
+            if connection.vendor=='sqlite':
+                plan=model.objects.filter(published=True).order_by('-created_at','-pk').values('pk').explain()
+                self.assertIn(name,plan);self.assertNotIn('TEMP B-TREE',plan)

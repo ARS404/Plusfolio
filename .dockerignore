@@ -11,3 +11,10 @@ frontend/dist
 .env.*
 *.pfb
 *.age
+
+# Generated metadata and private runtime files anywhere in the context
+**/*.tsbuildinfo
+**/*.sqlite3*
+**/*.key
+**/*.pem
+**/.DS_Store

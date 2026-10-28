@@ -13,5 +13,5 @@ settings.ALLOWED_HOSTS=['testserver','localhost','127.0.0.1']
 settings.TRUST_PROXY_CLIENT_IP=False
 # Tests provide their own SMTP mock. Nothing is sent to external addresses.
 settings.EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend'
-call_command('test','core.test_worksheets','core.test_search','core.test_catalogue_search','core.test_api_v1','core.test_server',
+call_command('test','core.test_worksheets','core.test_search','core.test_catalogue_search','core.test_api_v1','core.test_server','core.test_performance',
              interactive=False,keepdb=True)

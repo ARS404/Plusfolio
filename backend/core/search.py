@@ -1,13 +1,10 @@
 """Permission-scoped hybrid retrieval; the model never decides object access."""
-import hashlib
 import heapq
 import json
-import re
-import unicodedata
 from datetime import timedelta
 from functools import lru_cache
-from urllib.request import Request, urlopen
-from urllib.error import URLError
+from urllib.request import Request
+
 
 import numpy as np
 from django.conf import settings
@@ -15,9 +12,9 @@ from django.db import connection, transaction
 from django.db.models import Count, Q, Exists, OuterRef
 from django.utils import timezone
 from pgvector.django import CosineDistance
-
 from .models import Problem, ProblemSearchDocument, Discussion, WorksheetItem
 from . import services as s
+from .search_index import normalized, text_fields, sync_documents
 
 MODEL_ID = 'e5-small-int8-614241f622f5-chunk448-v1'
 
@@ -26,36 +23,32 @@ class EmbeddingUnavailable(Exception):
     pass
 
 
-def normalized(text):
-    # Preserve numbers, variable case and mathematical operators for exact matches.
-    return ' '.join(unicodedata.normalize('NFC', text).split())
-
-
 def problem_text(problem, kind):
     values = [problem.title, problem.description] if kind == 'metadata' else [getattr(problem, kind), getattr(problem, kind + '_tex')]
     return '\n'.join(dict.fromkeys(value.strip() for value in values if value.strip()))
+
+
+def sync_problems(problems):
+    def entries():
+        for problem in problems:
+            for kind in ['statement','solution','metadata']:
+                yield {'problem_id':problem.pk,'kind':kind,**text_fields(problem_text(problem,kind))}
+    sync_documents(ProblemSearchDocument,entries(),'problem_id')
 
 
 def sync_problem(problem):
     if not problem.published:
         ProblemSearchDocument.objects.filter(problem=problem).delete()
         return
-    for kind in ['statement', 'solution', 'metadata']:
-        text = problem_text(problem, kind)
-        fingerprint = hashlib.sha256(normalized(text).encode()).hexdigest()
-        doc, created = ProblemSearchDocument.objects.get_or_create(problem=problem, kind=kind,
-            defaults={'text': text, 'normalized': normalized(text).casefold(), 'fingerprint': fingerprint})
-        if not created and doc.fingerprint != fingerprint:
-            ProblemSearchDocument.objects.filter(pk=doc.pk).update(text=text, normalized=normalized(text).casefold(),
-                fingerprint=fingerprint, embedding=None, model='', retry_at=None)
+    sync_problems([problem])
 
 
 def reconcile_missing(rebuild=False):
-    # Also covers bulk imports, which intentionally bypass model signals.
+    # Bulk imports bypass signals, so recover missing rows in bounded batches.
     rows=Problem.objects.filter(published=True)
     if not rebuild:rows=rows.annotate(docs=Count('search_documents')).filter(docs__lt=3)
-    for problem in rows.iterator(chunk_size=100):
-        sync_problem(problem)
+    rows=rows.only('id','title','description','statement','statement_tex','solution','solution_tex')
+    sync_problems(rows.iterator(chunk_size=100))
 
 
 def _embed_request(texts, mode='query'):
