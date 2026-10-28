@@ -42,8 +42,17 @@ def issue_references(issue,personal=False):
 
 
 def project_for(worksheet,problems,allowed_solutions=(),solutions=False,issue=None):
-    if len(problems)>300 or sum(len(fragment(problem,'statement'))+(len(fragment(problem,'solution')) if solutions and problem.pk in allowed_solutions else 0) for problem in problems)>2*1024*1024:
+    if len(problems)>300:
         raise ValidationError('Для одного PDF доступны до 300 задач и до 2 МиБ исходников.')
+    sources = []
+    source_size = 0
+    for problem in problems:
+        statement = fragment(problem, 'statement')
+        solution = fragment(problem, 'solution') if solutions and problem.pk in allowed_solutions else None
+        source_size += len(statement) + len(solution or '')
+        if source_size > 2*1024*1024:
+            raise ValidationError('Для одного PDF доступны до 300 задач и до 2 МиБ исходников.')
+        sources.append((problem, statement, solution))
     version=getattr(worksheet,'template_version',TEMPLATE)
     if version!=TEMPLATE:raise ValidationError('Неизвестная версия шаблона TeX.')
     files={'main.tex':'% Plusfolio: main document\n\\input{variables.tex}\n\\input{template.tex}\n',
@@ -54,16 +63,16 @@ def project_for(worksheet,problems,allowed_solutions=(),solutions=False,issue=No
             'Number':str(issue.number) if issue else 'НОМЕР ЛИСТОЧКА'}
     files['variables.tex']='% Parameters of this issue\n'+'\n'.join(r'\newcommand{\Plusfolio'+key+'}{'+escape_text(value)+'}' for key,value in values.items())+'\n'
     tasks=[];answers=[]
-    for index,problem in enumerate(problems,1):
+    for index,(problem,statement,solution) in enumerate(sources,1):
         name=f'tasks/{index:03d}-{problem.pk}.tex'
         attribution=''
         origin=getattr(problem,'attribution',{})
         if origin:
             attribution='\n\\par{\\footnotesize\\sffamily Источник: '+escape_text(origin['source'])+' № '+escape_text(origin['source_id'])+'.\\par '+escape_text(origin['url'])+'}\n'
-        files[name]=fragment(problem,'statement')+attribution+'\n'
+        files[name]=statement+attribution+'\n'
         tasks.append(r'\item \input{'+name+'}')
-        if solutions and problem.pk in allowed_solutions:
-            name=f'solutions/{index:03d}-{problem.pk}.tex';files[name]=fragment(problem,'solution')+'\n'
+        if solution is not None:
+            name=f'solutions/{index:03d}-{problem.pk}.tex';files[name]=solution+'\n'
             answers.append(r'\item[\textbf{'+str(index)+r'.}] \input{'+name+'}')
     files['problems.tex']=r'\begin{enumerate}[leftmargin=*,label=\textbf{\arabic*.},itemsep=12pt]'+'\n'+'\n'.join(tasks)+'\n'+r'\end{enumerate}'+'\n'
     files['solutions.tex']=r'\clearpage\section*{Решения}\begin{enumerate}[leftmargin=*,itemsep=12pt]'+'\n'+'\n'.join(answers)+'\n'+r'\end{enumerate}'+'\n' if answers else '% No solutions included.\n'

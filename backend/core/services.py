@@ -81,30 +81,36 @@ def my_problems_for(user):
 def my_worksheets_for(user):
     require('student' in user.roles)
     return Worksheet.objects.filter(published=True).filter(Exists(Assignment.objects.filter(issue__worksheet_id=OuterRef('pk'),student__user=user)))
-def visible_solution_ids(user,problem_ids,circle=None):
-    ids=set(problem_ids)
-    if admin(user) or 'teacher' in user.roles:return ids
-    allowed=set()
+def solutions_for(user, problems, circle=None):
+    """One solution scope for material views, documents and search."""
+    if admin(user) or 'teacher' in user.roles:
+        return problems
+    allowed = Q(pk__in=[])
     if 'analyst' in user.roles:
-        allowed.update(Problem.objects.filter(pk__in=ids,items__worksheet__issues__circle__in=analyst_circles_for(user)).values_list('pk',flat=True))
+        allowed |= Q(Exists(WorksheetItem.objects.filter(
+            problem_id=OuterRef('pk'), worksheet__issues__circle__in=analyst_circles_for(user))))
     if 'student' in user.roles:
-        revealed=Discussion.objects.filter(problem_id__in=ids,discussed=True,solution_visible=True,
-            circle__enrollments__student__user=user,circle__enrollments__left_at=None,
-            circle__issues__worksheet__items__problem_id=F('problem_id'))
-        if circle is not None:revealed=revealed.filter(circle=circle)
-        allowed.update(revealed.values_list('problem_id',flat=True))
-    return allowed
-def solution_allowed(user,problem,circle=None):
-    if admin(user) or 'teacher' in user.roles: return True
-    if 'analyst' in user.roles and problem.items.filter(worksheet__issues__circle__in=analyst_circles_for(user)).exists(): return True
-    if 'student' not in user.roles: return False
-    revealed=Discussion.objects.filter(
-        problem=problem,discussed=True,solution_visible=True,
-        circle__enrollments__student__user=user,circle__enrollments__left_at=None,
-        circle__issues__worksheet__items__problem=problem,
-    )
-    if circle is not None:revealed=revealed.filter(circle=circle)
-    return revealed.exists()
+        revealed = Discussion.objects.filter(
+            problem_id=OuterRef('pk'), discussed=True, solution_visible=True,
+            circle__enrollments__student__user=user, circle__enrollments__left_at=None,
+            circle__issues__worksheet__items__problem_id=OuterRef('pk'))
+        if circle is not None:
+            revealed = revealed.filter(circle=circle)
+        allowed |= Q(Exists(revealed))
+    return problems.filter(allowed)
+
+
+def visible_solution_ids(user, problem_ids, circle=None):
+    ids = set(problem_ids)
+    if admin(user) or 'teacher' in user.roles:
+        return ids
+    return set(solutions_for(user, Problem.objects.filter(pk__in=ids), circle).values_list('pk', flat=True))
+
+
+def solution_allowed(user, problem, circle=None):
+    return problem.pk in visible_solution_ids(user, [problem.pk], circle)
+
+
 def topic_active(topic):
     seen=set()
     while topic:

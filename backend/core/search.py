@@ -9,10 +9,10 @@ from urllib.request import Request
 import numpy as np
 from django.conf import settings
 from django.db import connection, transaction
-from django.db.models import Count, Q, Exists, OuterRef
+from django.db.models import Count, Q
 from django.utils import timezone
 from pgvector.django import CosineDistance
-from .models import Problem, ProblemSearchDocument, Discussion, WorksheetItem
+from .models import Problem, ProblemSearchDocument
 from . import services as s
 from .search_index import normalized, text_fields, sync_documents
 
@@ -109,19 +109,6 @@ def index_batch(batch_size=8):
     return index_documents(ProblemSearchDocument.objects.filter(problem__published=True).exclude(text=''),batch_size)
 
 
-def solution_scope(user, problems):
-    if s.admin(user) or 'teacher' in user.roles:
-        return problems
-    visible = Q(pk__in=[])
-    if 'analyst' in user.roles:
-        visible |= Q(Exists(WorksheetItem.objects.filter(problem_id=OuterRef('pk'), worksheet__issues__circle__in=s.analyst_circles_for(user))))
-    if 'student' in user.roles:
-        visible |= Q(Exists(Discussion.objects.filter(problem_id=OuterRef('pk'), discussed=True, solution_visible=True,
-            circle__enrollments__student__user=user, circle__enrollments__left_at=None,
-            circle__issues__worksheet__items__problem_id=OuterRef('pk'))))
-    return problems.filter(visible)
-
-
 def selected_fields(field):
     return set(field) if isinstance(field,(list,set,tuple)) else ({'statement','solution','metadata'} if field=='all' else {field})
 
@@ -131,7 +118,7 @@ def allowed_documents(user, problems, field):
     docs = ProblemSearchDocument.objects.filter(problem__in=problems, problem__published=True)
     visible=Q(kind__in=fields-{'solution'})
     if 'solution' in fields:
-        visible |= Q(kind='solution',problem__in=solution_scope(user,problems))
+        visible |= Q(kind='solution',problem__in=s.solutions_for(user,problems))
     return docs.filter(visible).exclude(text='')
 
 

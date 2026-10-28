@@ -4,7 +4,6 @@ from django.conf import settings
 from django.contrib.auth import authenticate,login,logout
 from django.core.exceptions import ValidationError as DjangoValidationError,ObjectDoesNotExist
 from django.db import IntegrityError,transaction
-from django.db.models import Q
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
 from django.utils import timezone
@@ -40,9 +39,22 @@ class PrivateCacheMiddleware:
         return response
 
 def user_data(user):
-    if not user.is_authenticated:return None
+    if not user.is_authenticated:
+        return None
     from .people import student_profile_complete
-    return {'id':user.pk,'public_id':public_id('user',user.pk),'student_public_id':public_id('student',user.student.pk) if hasattr(user,'student') else None,'teacher_public_id':public_id('teacher',user.teacher.pk) if hasattr(user,'teacher') else None,'name':user.name,'email':user.email,'roles':user.roles,'is_active':user.is_active,'student_id':user.student.pk if hasattr(user,'student') else None,**({**user.student.education_info(),'no_patronymic':user.student.no_patronymic,'profile_complete':student_profile_complete(user.student)} if hasattr(user,'student') else {})}
+    student = getattr(user, 'student', None)
+    teacher = getattr(user, 'teacher', None)
+    result = {
+        'id': user.pk, 'public_id': public_id('user', user.pk),
+        'student_public_id': public_id('student', student.pk) if student else None,
+        'teacher_public_id': public_id('teacher', teacher.pk) if teacher else None,
+        'name': user.name, 'email': user.email, 'roles': user.roles,
+        'is_active': user.is_active, 'student_id': student.pk if student else None,
+    }
+    if student:
+        result.update(student.education_info(), no_patronymic=student.no_patronymic,
+                      profile_complete=student_profile_complete(student))
+    return result
 
 @ensure_csrf_cookie
 @require_http_methods(['GET'])
@@ -285,7 +297,6 @@ def materials(request,kind):
     if ids is not None:qs=qs.filter(topics__pk__in=ids).distinct()
     text=request.query_params.get('q','').strip()
     if text:
-        q=Q(title__icontains=text)|Q(description__icontains=text)
         qs=s.search_problems(qs,text) if kind=='problem' else search_entities(qs,text,'worksheet','document__number_id',('title','description'),('pk','document_id'))
     paginated=kind=='problem' and request.query_params.get('pagination')=='1'
     if paginated:

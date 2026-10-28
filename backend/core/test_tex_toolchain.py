@@ -62,6 +62,15 @@ class PortableToolchainTests(SimpleTestCase):
             self.assertIn('.local/tectonic-cache/extra',build_contract(root,cache)['files'])
             extra.unlink();self.assertNotIn('.local/tectonic-cache/extra',build_contract(root,cache)['files'])
 
+    def test_hidden_solution_source_is_neither_validated_nor_added_to_project(self):
+        from django.core.exceptions import ValidationError
+        task=SimpleNamespace(pk='hidden',statement='Условие',solution='',statement_tex='',
+                             solution_tex=r'\documentclass{article}',attribution={})
+        sheet=SimpleNamespace(title='Листок',description='')
+        project=project_for(sheet,[task],[],True)
+        self.assertFalse(any(name.startswith('solutions/') for name in project))
+        with self.assertRaises(ValidationError):project_for(sheet,[task],[task.pk],True)
+
     def test_draft_preview_uses_the_same_project_builder_without_a_database(self):
         path=settings.BASE_DIR/'scripts/preview_tex.py'
         spec=importlib.util.spec_from_file_location('preview_test',path)

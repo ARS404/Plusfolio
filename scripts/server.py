@@ -21,11 +21,9 @@ else:
 def docker(*args,**kwargs):return subprocess.run(['docker',*args],cwd=ROOT,check=True,**kwargs)
 
 def compose(*args,**kwargs):
-    probe=subprocess.run(['docker','compose','version'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-    prefix=['docker','compose'] if probe.returncode==0 else ['docker-compose']
     values=read_env()
     kwargs.setdefault('env',{**os.environ,**{key:str(value) for key,value in values.items()}})
-    return subprocess.run([*prefix,'--project-name',values['COMPOSE_PROJECT_NAME'],'--env-file',str(STATE/'env'),'-f',str(ROOT/'compose.yml'),*args],cwd=ROOT,check=True,**kwargs)
+    return subprocess.run(['docker','compose','--project-name',values['COMPOSE_PROJECT_NAME'],'--env-file',str(STATE/'env'),'-f',str(ROOT/'compose.yml'),*args],cwd=ROOT,check=True,**kwargs)
 
 def write_env(values):
     if (STATE/'env').exists():(STATE/'env').chmod(0o600)

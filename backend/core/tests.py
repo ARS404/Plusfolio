@@ -305,6 +305,24 @@ class DomainTests(TestCase):
         reviewed=s.mark(user,circle,self.problem.pk,{'value':True,'version':row.version if row else 0},discussion=True)
         return s.mark(user,circle,self.problem.pk,{'value':True,'version':reviewed['version']},solution_visibility=True)
 
+    def test_student_and_analyst_solution_scopes_unite_and_revoke_independently(self):
+        self.student.roles=['student','analyst'];self.student.save(update_fields=['roles'])
+        tag=Tag.objects.create(kind='circle',name='Independent solution scope')
+        self.foreign.tags.add(tag)
+        grant=AnalystGrant.objects.create(user=self.student,tag=tag)
+        analyst_ids=set(Problem.objects.filter(items__worksheet__issues__circle=self.foreign).values_list('pk',flat=True))
+        problem_ids=list(Problem.objects.values_list('pk',flat=True))
+        with self.assertNumQueries(1):
+            self.assertEqual(s.visible_solution_ids(self.student,problem_ids),analyst_ids)
+        self._reveal_solution()
+        self.assertEqual(s.visible_solution_ids(self.student,problem_ids),analyst_ids|{self.problem.pk})
+        self.assertEqual(s.visible_solution_ids(self.student,problem_ids,self.other),analyst_ids)
+        grant.delete()
+        self.assertEqual(s.visible_solution_ids(self.student,problem_ids),{self.problem.pk})
+        s.unenroll(self.teacher,self.circle,self.student.email)
+        self.assertEqual(s.visible_solution_ids(self.student,problem_ids),set())
+        self.assertFalse(s.solution_allowed(self.student,self.problem))
+
     def test_solution_visibility_defaults_to_hidden_even_for_discussed_tasks(self):
         self.assertTrue(Discussion.objects.filter(discussed=True).exists())
         self.assertFalse(Discussion.objects.filter(solution_visible=True).exists())
