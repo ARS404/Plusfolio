@@ -153,12 +153,14 @@ def export(data, file_format):
         body = xlsx(data, cols)
         content_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     else:
-        buffer = io.StringIO(newline='')
-        writer = csv.writer(buffer, delimiter='\t', lineterminator='\r\n')
-        writer.writerow(['Школьник'] + [tsv_cell(f'{block["worksheet"]["title"]} · {block["issued_on"]}') for _, block, _, _ in cols])
-        writer.writerow([''] + [tsv_cell(label) for _, _, _, label in cols])
-        writer.writerows([[tsv_cell(value) for value in row] for row in rows(data, cols)])
-        body = buffer.getvalue().encode('utf-8-sig')
+        buffer = io.BytesIO()
+        with io.TextIOWrapper(buffer, encoding='utf-8-sig', newline='') as stream:
+            writer = csv.writer(stream, delimiter='\t', lineterminator='\r\n')
+            writer.writerow(['Школьник'] + [tsv_cell(f'{block["worksheet"]["title"]} · {block["issued_on"]}') for _, block, _, _ in cols])
+            writer.writerow([''] + [tsv_cell(label) for _, _, _, label in cols])
+            writer.writerows([tsv_cell(value) for value in row] for row in rows(data, cols))
+            stream.flush()
+            body = buffer.getvalue()
         content_type = 'text/tab-separated-values; charset=utf-8'
     response = HttpResponse(body, content_type=content_type)
     filename = f'plusfolio-{data["circle"]["id"][:8]}-{timezone.localdate():%Y%m%d}.{file_format}'

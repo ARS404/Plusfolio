@@ -51,9 +51,12 @@ class WorksheetWorkspaceTests(TestCase):
             self.assertEqual(self.update(user,data,title='Чужая правка').status_code,403)
         for user in [self.mentor,self.teacher,self.analyst,self.student]:
             self.assertEqual(self.client_for(user).post('/api/worksheet-documents/'+data['document_id']+'/publish',{'version':1},format='json').status_code,403)
-        changed=self.update(self.mentor,data,title='Личный вариант')
+        changed=self.update(self.mentor,data,title='Личный вариант',description=data['description'],
+            topics=data['topics'],tags=[],problems=list(reversed(data['problem_ids'])))
         self.assertEqual(changed.status_code,200);self.assertEqual(changed.data['revision'],2)
         self.assertEqual(changed.data['document_id'],data['document_id'])
+        self.assertEqual(changed.data['tags'],[])
+        self.assertEqual(changed.data['problem_ids'],list(reversed(data['problem_ids'])))
         public=self.client_for(self.admin).post('/api/worksheet-documents/'+data['document_id']+'/publish',{'version':2},format='json')
         self.assertEqual(public.status_code,200);self.assertTrue(public.data['is_public'])
         visible=self.client_for(self.teacher).get('/api/materials/worksheet',{'scope':'public'}).data

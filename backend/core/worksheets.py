@@ -36,11 +36,12 @@ def metadata(revision,user):
             'has_unpublished_changes':bool((owner or s.admin(user)) and document.public_revision_id and document.public_revision_id!=document.current_revision_id)}
 
 
-def fields(revision):
-    return {'title':revision.title,'description':revision.description,
-            'topics':[str(pk) for pk in revision.topics.values_list('pk',flat=True)],
-            'tags':list(revision.tags.values_list('pk',flat=True)),
-            'problems':[str(pk) for pk in revision.items.values_list('problem_id',flat=True)]}
+def fields(revision,overrides=None):
+    overrides={} if overrides is None else overrides
+    return {'title':overrides.get('title',revision.title),'description':overrides.get('description',revision.description),
+            'topics':overrides['topics'] if 'topics' in overrides else [str(pk) for pk in revision.topics.values_list('pk',flat=True)],
+            'tags':overrides['tags'] if 'tags' in overrides else list(revision.tags.values_list('pk',flat=True)),
+            'problems':overrides['problems'] if 'problems' in overrides else [str(pk) for pk in revision.items.values_list('problem_id',flat=True)]}
 
 
 @transaction.atomic
@@ -52,9 +53,7 @@ def update(user,pk,data):
     if base.archived:raise ValidationError('Листок в архиве.')
     if type(data.get('version')) is not int:raise ValidationError('Передайте номер редактируемой версии.')
     if data['version']!=base.revision:raise s.Conflict('Листок уже изменён. Обновите страницу перед сохранением.')
-    values=fields(base)
-    values.update({key:data[key] for key in values if key in data})
-    return s.create_material(user,'worksheet',values,_document=document,_base=base)
+    return s.create_material(user,'worksheet',fields(base,data),_document=document,_base=base)
 
 
 @transaction.atomic

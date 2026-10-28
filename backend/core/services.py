@@ -306,7 +306,7 @@ class Conflict(Exception):pass
 @transaction.atomic
 def mark(user,circle,problem_id,data,discussion=False,solution_visibility=False):
     require(can_write(user,circle))
-    problem=Problem.objects.filter(pk=problem_id,items__worksheet__issues__circle=circle).first()
+    problem=Problem.objects.only('pk').filter(pk=problem_id,items__worksheet__issues__circle=circle).first()
     if not problem:raise ValidationError('Задача не выдавалась этому кружку.')
     value=data.get('value');version=data.get('version')
     if type(value) is not bool or type(version) is not int or version<0:raise ValidationError('Передайте да/нет и ожидаемую версию.')
