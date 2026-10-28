@@ -59,6 +59,18 @@ def xlsx(data, cols):
     sheet.title = 'Журнал'
     sheet.sheet_view.showGridLines = False
     width = 1 + len(cols)
+    # These immutable components are shared by cells in this workbook. Creating
+    # equal Font/Border/Fill objects per cell makes style interning needlessly costly.
+    body_font = Font(name='Calibri', size=11, color='273E34')
+    block_font = Font(name='Calibri', size=11, bold=True, color=GREEN)
+    task_font = Font(name='Calibri', size=10, bold=True, color=GREEN)
+    left = Alignment(vertical='center', horizontal='left', wrap_text=True)
+    centered = Alignment(vertical='center', horizontal='center', wrap_text=True)
+    block_fills = (PatternFill('solid', fgColor=PALE), PatternFill('solid', fgColor=BLUE))
+    discussion_fill = PatternFill('solid', fgColor='F0F3ED')
+    solved_fill = PatternFill('solid', fgColor='E7F0DF')
+    stripe_fill = PatternFill('solid', fgColor='FAFBF8')
+    bottom_border = Border(bottom=Side(style='hair', color='DFE6DB'))
     def put(row, column, value):
         cell = sheet.cell(row, column)
         if isinstance(value, (int, float)):
@@ -66,8 +78,8 @@ def xlsx(data, cols):
         else:
             cell.value = text(value)
             cell.data_type = 's'
-        cell.font = Font(name='Calibri', size=11, color='273E34')
-        cell.alignment = Alignment(vertical='center', horizontal='center' if column > 1 else 'left', wrap_text=True)
+        cell.font = body_font
+        cell.alignment = centered if column > 1 else left
         return cell
     def title_row(row, value):
         put(row, 1, value)
@@ -93,25 +105,25 @@ def xlsx(data, cols):
             sheet.merge_cells(start_row=5, start_column=start, end_row=5, end_column=start + count - 1)
         for column in range(start, start + count):
             cell = sheet.cell(5, column)
-            cell.fill = PatternFill('solid', fgColor=PALE if index % 2 == 0 else BLUE)
-            cell.font = Font(name='Calibri', size=11, bold=True, color=GREEN)
-            cell.alignment = Alignment(wrap_text=True, vertical='center', horizontal='center')
+            cell.fill = block_fills[index % 2]
+            cell.font = block_font
+            cell.alignment = centered
         start += count
     for column, (index, _, _, label) in enumerate(cols, 2):
         cell = put(6, column, label)
-        cell.fill = PatternFill('solid', fgColor=PALE if index % 2 == 0 else BLUE)
-        cell.font = Font(name='Calibri', size=10, bold=True, color=GREEN)
+        cell.fill = block_fills[index % 2]
+        cell.font = task_font
     for row_number, values in enumerate(rows(data, cols), 7):
         sheet.row_dimensions[row_number].height = 28
         for column, value in enumerate(values, 1):
             cell = put(row_number, column, value)
             if row_number == 7:
-                cell.fill = PatternFill('solid', fgColor='F0F3ED')
+                cell.fill = discussion_fill
             elif column > 1 and value == 'Да':
-                cell.fill = PatternFill('solid', fgColor='E7F0DF')
+                cell.fill = solved_fill
             elif row_number % 2 == 0:
-                cell.fill = PatternFill('solid', fgColor='FAFBF8')
-            cell.border = Border(bottom=Side(style='hair', color='DFE6DB'))
+                cell.fill = stripe_fill
+            cell.border = bottom_border
     sheet['A5'].fill = PatternFill('solid', fgColor=GREEN)
     sheet['A5'].font = Font(name='Calibri', size=11, bold=True, color='FFFFFF')
     sheet.row_dimensions[5].height = 42

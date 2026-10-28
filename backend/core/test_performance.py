@@ -70,6 +70,22 @@ class QueryBudgetTests(TestCase):
         self.assertTrue(all(len(block['problems'])==80 for block in result['blocks']))
         self.assertTrue(all('solution' not in problem for block in result['blocks'] for problem in block['problems']))
 
+    def test_export_snapshot_matches_screen_data_without_loading_task_bodies(self):
+        from .journal import select_issues, snapshot
+        circle=self.circles[0]
+        serialize=lambda problem,user:{'id':str(problem.pk),'title':problem.display_title}
+        for user in [self.teacher,self.student,self.admin]:
+            expected=snapshot(user,circle,select_issues(circle),serialize)
+            with CaptureQueriesContext(connection) as queries:
+                result=snapshot(user,circle,select_issues(circle,for_export=True),serialize)
+            self.assertEqual(result,expected)
+            self.assertLessEqual(len(queries),8)
+            task_reads=[query['sql'] for query in queries if 'FROM "core_problem"' in query['sql']]
+            self.assertEqual(len(task_reads),1)
+            for field in ['statement','solution','statement_tex','solution_tex','source_metadata','author_id']:
+                self.assertNotIn(f'"core_problem"."{field}"',task_reads[0])
+            self.assertFalse(any('core_problem_tags' in query['sql'] or 'core_problem_topics' in query['sql'] for query in queries))
+
     def test_large_report_cohorts_preserve_global_counts_and_full_sheet_completion(self):
         circle=self.circles[0]
         peer=User.objects.create_user('report-peer@example.test','unused',name='Тестовый Второй Ученик',roles=['student'])

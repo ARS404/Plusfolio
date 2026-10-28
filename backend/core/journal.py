@@ -5,11 +5,16 @@ from .models import WorksheetItem, Problem, Solve, Discussion
 from . import services as s
 
 
-def select_issues(circle, raw='all'):
+def select_issues(circle, raw='all', *, for_export=False):
+    if for_export:
+        # Downloads only expose titles and result cells. Avoid fetching source
+        # bodies, author accounts and taxonomy relations for every issued task.
+        problems = Problem.objects.only('id', 'title', 'number', 'source', 'source_id')
+    else:
+        problems = Problem.objects.select_related('author').prefetch_related('topics', 'tags')
+    items = WorksheetItem.objects.prefetch_related(Prefetch('problem', queryset=problems))
     queryset = circle.issues.select_related('worksheet__document').prefetch_related(
-        Prefetch('worksheet__items',queryset=WorksheetItem.objects.prefetch_related(
-            Prefetch('problem',queryset=Problem.objects.select_related('author').prefetch_related('topics','tags'))
-        ))
+        Prefetch('worksheet__items', queryset=items)
     ).order_by('-issued_on', '-pk')
     if raw != 'all':
         try:

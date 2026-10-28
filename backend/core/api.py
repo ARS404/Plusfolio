@@ -343,7 +343,7 @@ def journal_export(request,pk):
     from .journal import select_issues, snapshot
     from .journal_export import export
     circle=s.get_circle(request.user,pk)
-    selected=select_issues(circle,request.query_params.get('issues','all'))
+    selected=select_issues(circle,request.query_params.get('issues','all'),for_export=True)
     data=snapshot(request.user,circle,selected,lambda problem,user:{'id':str(problem.pk),'title':problem.display_title},request.query_params.get('q',''))
     return export(data,request.query_params.get('file_format','xlsx'))
 
