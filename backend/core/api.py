@@ -115,7 +115,8 @@ def circles(request):
 
 @api_view(['GET','PATCH'])
 def circle_detail(request,pk):
-    circle=s.get_circle(request.user,pk,write=request.method=='PATCH')
+    circle=s.get_circle(request.user,pk,write=True) if request.method=='PATCH' else read.circle_rows(s.circles_for(request.user).filter(pk=pk),request.user).first()
+    if circle is None:raise s.NotFound('Кружок недоступен.')
     if request.method=='PATCH':
         for field in ['name','description','city','region']:
             if field in request.data:setattr(circle,field,str(request.data[field]))

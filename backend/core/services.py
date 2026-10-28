@@ -368,7 +368,7 @@ def invite(user,email,role,circle=None,tag_ids=None):
     return invitation
 
 def valid_invitation(token,lock=False):
-    qs=Invitation.objects.select_for_update() if lock else Invitation.objects
+    qs=Invitation.objects.select_for_update() if lock else Invitation.objects.select_related('created_by','circle')
     invitation=qs.filter(token_hash=hashlib.sha256(token.encode()).hexdigest()).first()
     if not invitation or invitation.state!='pending' or invitation.expires_at<=timezone.now():raise ValidationError('Приглашение истекло, отозвано или уже использовано.')
     require(invitation.created_by.is_active and invitation_allowed(invitation.created_by,invitation.role,invitation.circle),'Отправитель больше не может выдать доступ.')

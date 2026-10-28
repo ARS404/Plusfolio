@@ -56,6 +56,7 @@ class QueryBudgetTests(TestCase):
             self.assertEqual(circle['student_count'],1);self.assertEqual(circle['worksheet_count'],40)
             self.assertEqual(circle['can_write'],user.pk!=self.student.pk)
             self.assertEqual(circle['teachers'][0]['email'],None if user.pk==self.student.pk else self.teacher.email)
+            self.assertEqual(self.request(user,f'/api/circles/{self.circles[0].pk}',3),circle)
 
     def test_material_and_issuance_reads_do_not_query_per_row(self):
         self.assertGreaterEqual(len(self.request(self.teacher,'/api/materials/problem',4)),80)
