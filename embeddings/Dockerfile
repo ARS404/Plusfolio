@@ -25,3 +25,11 @@ ENV MODEL_DIRECTORY=/model EMBEDDING_THREADS=2
 EXPOSE 8011
 HEALTHCHECK --interval=20s --timeout=3s --start-period=60s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8011/health',timeout=2)"
 CMD ["python", "server.py", "--host", "0.0.0.0"]
+
+ARG APP_VERSION=unknown
+ARG RELEASE_STATUS=unknown
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.version=$APP_VERSION \
+      io.plusfolio.release-status=$RELEASE_STATUS \
+      org.opencontainers.image.revision=$VCS_REF \
+      org.opencontainers.image.source="https://github.com/ARS404/Plusfolio"

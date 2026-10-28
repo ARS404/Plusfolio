@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from cryptography.fernet import Fernet
 from django.conf import settings
 from django.db import connection
+from .release import release_info
 
 EXCLUDE={'.git','.deploy','.local','node_modules','__pycache__','.venv'}
 CHUNK_SIZE=1024*1024
@@ -40,7 +41,7 @@ def create_bundle(destination):
         snapshot=Path(directory)/'snapshot.sqlite3'
         target=sqlite3.connect(snapshot)
         connection.connection.backup(target);target.close()
-        manifest={'format':'plusfolio-demo-v1','created_at':datetime.now(timezone.utc).isoformat(),'files':{},'database':'sqlite','mail_policy':'disabled_after_restore'}
+        manifest={'release':release_info(),'format':'plusfolio-demo-v1','created_at':datetime.now(timezone.utc).isoformat(),'files':{},'database':'sqlite','mail_policy':'disabled_after_restore'}
         buffer=io.BytesIO()
         with zipfile.ZipFile(buffer,'w',zipfile.ZIP_DEFLATED) as archive:
             manifest['files']['.local/demo.sqlite3']=write_file(archive,'.local/demo.sqlite3',snapshot)

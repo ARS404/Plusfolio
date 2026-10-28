@@ -1,3 +1,4 @@
+from .release import release_info
 from django.conf import settings
 from django.db import connection
 from django.http import JsonResponse
@@ -20,4 +21,4 @@ def ready(request):
             with build_opener(ProxyHandler({})).open(settings.EMBEDDING_URL+'/health',timeout=2) as response:checks['search']=response.status==200
         except Exception:checks['search']=False
         checks['mail_configuration']=bool(settings.EMAIL_HOST and settings.DEFAULT_FROM_EMAIL)
-    return JsonResponse({'ok':all(checks.values()),'checks':checks,'instance':__import__('os').environ.get('PLUSFOLIO_INSTANCE_ID','demo')},status=200 if all(checks.values()) else 503)
+    return JsonResponse({'ok':all(checks.values()),'checks':checks,'release':release_info(),'instance':__import__('os').environ.get('PLUSFOLIO_INSTANCE_ID','demo')},status=200 if all(checks.values()) else 503)

@@ -66,7 +66,8 @@ def _backup():
     directory=Path('/backups');directory.mkdir(exist_ok=True)
     stamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
     target=directory/f'plusfolio-{stamp}.tar.gz.age';temporary=target.with_suffix('.partial')
-    manifest={'format':'plusfolio-server-v1','created_at':datetime.now(timezone.utc).isoformat(),'files':{},'image':os.environ.get('RELEASE_ID','local-build')}
+    from release import build_metadata
+    manifest={'release':build_metadata(ROOT),'format':'plusfolio-server-v1','created_at':datetime.now(timezone.utc).isoformat(),'files':{},'image':os.environ.get('RELEASE_ID','local-build')}
     with TemporaryDirectory(prefix='plusfolio-backup-') as scratch:
         dump=Path(scratch)/'database.dump'
         env=os.environ.copy();env['PGPASSWORD']=Path(env['POSTGRES_PASSWORD_FILE']).read_text().strip()
@@ -76,7 +77,7 @@ def _backup():
         for name in ['backend','scripts','deploy','data','docs','frontend','embeddings','.github']:
             for path in (ROOT/name).rglob('*'):
                 if path.is_file() and not path.is_symlink() and '__pycache__' not in path.parts and path.suffix!='.pyc':paths['source/'+str(path.relative_to(ROOT))]=path
-        for name in ['README.md','compose.yml','.dockerignore','.gitignore','requirements.lock','requirements-server.lock','requirements-tex.lock','requirements.txt']:
+        for name in ['README.md','CHANGELOG.md','release.json','compose.yml','.dockerignore','.gitignore','requirements.lock','requirements-server.lock','requirements-tex.lock','requirements.txt']:
             paths['source/'+name]=ROOT/name
         for name in ['tools','tectonic-cache','tectonic-config']:
             for path in (ROOT/'.local'/name).rglob('*'):

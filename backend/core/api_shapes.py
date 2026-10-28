@@ -272,7 +272,9 @@ SCHEMAS['GuideCatalogue']=record('Доступная документация',{
  'sections':array(ref('GuideSection')),'audience':text(enum=['human','robot']),'api_base':text('Базовый путь /api/v1.'),
  'read_only_token':boolean('Текущий токен ограничен чтением.'),'markdown_url':text('URL скачивания руководства.'),'openapi_url':text('URL OpenAPI-схемы.')},
  ['sections','audience','api_base','read_only_token','markdown_url','openapi_url','instruction_policy_version','mandatory_instructions'])
+SCHEMAS['Release']=record('Версия продукта и сборки',{'version':text('Версия продукта по SemVer.'),'status':text(enum=['development','released']),'revision':text('Git SHA, SHA-dirty либо unknown для архива без ревизии.')},['version','status','revision'])
 SCHEMAS['OpenAPI']=record('Схема OpenAPI 3.1',{
+ 'x-plusfolio-release':ref('Release'),
  'openapi':text('Версия стандарта.'),'info':record('О сервисе',{'title':text(),'version':text(),'description':text()}),
  'servers':array(record('Базовый URL',{'url':text()})),'security':array({'type':'object','description':'Допустимые схемы аутентификации.'}),
  'paths':{'type':'object','description':'Ключи — пути; значения — описания доступных HTTP-методов.','additionalProperties':True},

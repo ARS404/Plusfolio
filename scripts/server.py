@@ -7,6 +7,16 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 STATE=ROOT/'.deploy'
 
+INSTALLED_VERSION_CODE = """import json,sys
+from pathlib import Path
+if Path('backend/core/release.py').is_file():
+    sys.path.insert(0,'backend')
+    from core.release import release_info
+    print(json.dumps(release_info()))
+else:
+    print(json.dumps({'version':None,'status':'unversioned','revision':'unknown'}))
+"""
+
 
 def docker(*args,**kwargs):return subprocess.run(['docker',*args],cwd=ROOT,check=True,**kwargs)
 
@@ -168,7 +178,7 @@ def run(args):
         print('Plusfolio ready locally: http://127.0.0.1:'+values['LOCAL_PORT'])
         print('Connect the existing HTTPS proxy for '+values['PUBLIC_URL']+'; see proxy-config nginx|caddy|traefik, then check-public.')
         print('Save .deploy/backup.key separately; encrypted backups and retention are running.')
-    elif args.command in {'status','logs','backup','prune-backups','download-backup','export-images','restore-database','stop'}:
+    elif args.command in {'status','logs','backup','prune-backups','download-backup','export-images','restore-database','stop','version'}:
         server_host.tools_ready()
         server_host.project_containers(docker,values,ROOT)
         operate(args,values)
@@ -178,7 +188,9 @@ def run(args):
 
 
 def operate(args,values):
-    if args.command=='status':compose('ps')
+    if args.command=='version':
+        compose('exec','-T','web','python','-c',INSTALLED_VERSION_CODE)
+    elif args.command=='status':compose('ps')
     elif args.command=='logs':compose('logs','--tail','80',*(args.services or []))
     elif args.command=='backup':compose('exec','-T','backup','python','scripts/server_backup.py')
     elif args.command=='prune-backups':compose('exec','-T','backup','python','scripts/server_backup.py','--prune-only')
@@ -230,7 +242,7 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);sub=parser.add_subparsers(dest='command',required=True)
     init=sub.add_parser('init');init.add_argument('--no-build',action='store_true');init.add_argument('--config',help='JSON file for unattended setup; secrets never go in CLI arguments')
     update=sub.add_parser('update');update.add_argument('--no-build',action='store_true')
-    for name in ['up','status','backup','prune-backups','stop','doctor','check-public']:sub.add_parser(name)
+    for name in ['up','status','backup','prune-backups','stop','doctor','check-public','version']:sub.add_parser(name)
     proxy=sub.add_parser('proxy-config');proxy.add_argument('kind',choices=['nginx','caddy','traefik'])
     logs=sub.add_parser('logs');logs.add_argument('services',nargs='*')
     restore=sub.add_parser('restore-backup');restore.add_argument('file');restore.add_argument('--key');restore.add_argument('--into',required=True);restore.add_argument('--image',help='Loaded application image for recovery on a fresh host')

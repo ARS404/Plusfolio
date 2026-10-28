@@ -81,6 +81,9 @@ def check_limits(config):
 
 def build_images(docker,values,root,targets=None):
     """Private bounded builder; preserve the caller's current/default builder."""
+    from release import check, build_metadata
+    check(root)
+    release=build_metadata(root)
     identity=values['INSTANCE_ID']+values['COMPOSE_PROJECT_NAME']+values['BUILD_MEMORY']+str(values['BUILD_CPUS'])
     name='plusfolio-'+hashlib.sha256(identity.encode()).hexdigest()[:16]
     available=docker('buildx','ls','--format','{{.Name}}',stdout=subprocess.PIPE).stdout.decode().split()
@@ -92,7 +95,7 @@ def build_images(docker,values,root,targets=None):
                '--driver-opt','cpu-shares=128','--driver-opt','restart-policy=no',stdout=subprocess.DEVNULL)
     env={**os.environ,**{key:str(value) for key,value in values.items()}}
     try:
-        docker('buildx','bake','--builder',name,'--file',str(Path(root)/'compose.yml'),'--load',*(targets or ['web','tex','embeddings']),env=env)
+        docker('buildx','bake','--builder',name,'--file',str(Path(root)/'compose.yml'),'--load','--set','*.args.APP_VERSION='+release['version'],'--set','*.args.VCS_REF='+release['revision'],'--set','*.args.RELEASE_STATUS='+release['status'],*(targets or ['web','tex','embeddings']),env=env)
     finally:docker('buildx','stop',name,stdout=subprocess.DEVNULL)
     return name
 

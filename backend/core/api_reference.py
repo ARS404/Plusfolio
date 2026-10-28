@@ -3,6 +3,7 @@ from django.conf import settings
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .api_contract import operations_for
+from .release import release_info
 from .robot_workflows import mandatory_instructions, POLICY_VERSION
 from .api_shapes import DESCRIPTIONS, parameter_description, reachable_schemas, request_schema_for, response_schema_for
 
@@ -35,7 +36,7 @@ def schema_for(user, *, demo=False, read_only=False):
             operation['requestBody'] = {'required':True,'content':{'application/json':{'schema':request_schema_for(item['id'],item['body']),
                 **({'example':item['example']} if item['example'] is not None else {})}}}
         paths.setdefault(item['path'][len('/api/v1'):], {})[item['method'].lower()] = operation
-    return {'openapi':'3.1.0','x-plusfolio-mandatory-instructions':{'policy_version':POLICY_VERSION,'documentation_url':'/api/v1/documentation?audience=robot','instructions':mandatory_instructions(user,read_only=read_only)},'info':{'title':'Plusfolio API','version':'1.0.0',
+    return {'openapi':'3.1.0','x-plusfolio-release':release_info(),'x-plusfolio-mandatory-instructions':{'policy_version':POLICY_VERSION,'documentation_url':'/api/v1/documentation?audience=robot','instructions':mandatory_instructions(user,read_only=read_only)},'info':{'title':'Plusfolio API','version':release_info()['version'],
                 'description':'Роботы MUST до сценария прочитать обязательные инструкции из GET /api/v1/documentation?audience=robot и соблюдать x-plusfolio-mandatory-instructions. Область схемы соответствует текущим ролям и режиму токена. Для автоматизации используйте Bearer; браузерная сессия сохраняет CSRF-защиту. Схема описывает возможности роли, конкретный кружок и авторство проверяются при запросе.'},
             'servers':[{'url':'/api/v1'}], 'security':[{'BearerAuth':[]}], 'paths':paths,
             'externalDocs':{'description':'Читаемый справочник без отправки запросов.','url':'/#/documentation/api'},

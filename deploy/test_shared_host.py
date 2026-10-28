@@ -53,6 +53,11 @@ class HostTests(unittest.TestCase):
         created=next(args for args,_ in calls if args[:2]==('buildx','create'))
         self.assertIn('cpu-quota=100000',created);self.assertIn('memory=1024m',created)
         self.assertNotIn('--use',created);self.assertEqual(calls[-1][0],('buildx','stop',name))
+        bake=next(args for args,_ in calls if args[:2]==('buildx','bake'))
+        release=json.loads((ROOT/'release.json').read_text())
+        self.assertIn('*.args.APP_VERSION='+release['version'],bake)
+        self.assertIn('*.args.RELEASE_STATUS='+release['status'],bake)
+        self.assertTrue(any(value.startswith('*.args.VCS_REF=') for value in bake))
     def test_failed_build_also_stops_only_its_builder(self):
         calls=[]
         def docker(*args,**kwargs):
@@ -67,6 +72,14 @@ class HostTests(unittest.TestCase):
         call=runner.call_args
         self.assertEqual(call.kwargs['env']['COMPOSE_PROJECT_NAME'],'plusfolio-a')
         self.assertIn('--project-name',call.args[0]);self.assertIn('plusfolio-a',call.args[0])
+    def test_runtime_version_queries_container_and_supports_preversioned_images(self):
+        with patch('server.compose') as compose:
+            server.operate(argparse.Namespace(command='version'),self.values())
+        self.assertEqual(compose.call_args.args[:5],('exec','-T','web','python','-c'))
+        with tempfile.TemporaryDirectory() as directory:
+            result=subprocess.run([sys.executable,'-c',server.INSTALLED_VERSION_CODE],cwd=directory,check=True,text=True,capture_output=True)
+        self.assertEqual(json.loads(result.stdout),{'version':None,'status':'unversioned','revision':'unknown'})
+
     def test_init_without_tools_does_not_create_configuration(self):
         with tempfile.TemporaryDirectory() as temporary,patch.object(server,'STATE',Path(temporary)/'absent'),patch('server_host.tools_ready',side_effect=RuntimeError('missing tools')):
             with self.assertRaises(RuntimeError):server.run(argparse.Namespace(command='init',config=None,no_build=False))

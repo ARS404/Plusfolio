@@ -4,6 +4,7 @@ COPY frontend/package*.json ./
 RUN --mount=type=cache,id=plusfolio-npm,target=/root/.npm,sharing=locked \
     npm ci --prefer-offline --no-audit --no-fund
 COPY frontend/ ./
+COPY release.json /src/release.json
 RUN npm test && npm run build
 
 FROM python:3.14-slim-bookworm AS prepared
@@ -33,7 +34,7 @@ COPY docs/ docs/
 COPY embeddings/ embeddings/
 COPY frontend/ frontend/
 COPY deploy/ deploy/
-COPY README.md requirements.txt requirements-tex.lock compose.yml .dockerignore .gitignore ./
+COPY README.md CHANGELOG.md release.json requirements.txt requirements-tex.lock compose.yml .dockerignore .gitignore ./
 COPY .github/ .github/
 COPY --from=frontend /src/frontend/dist frontend/dist
 RUN mkdir -p /run/plusfolio-tex /backups /deployment \
@@ -43,6 +44,15 @@ USER 65532:65532
 ENV PLUSFOLIO_DEMO=0
 EXPOSE 8000
 CMD ["gunicorn", "--chdir", "backend", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--threads", "4", "--timeout", "60", "--access-logfile", "/dev/null", "--error-logfile", "-"]
+
+ARG APP_VERSION=unknown
+ARG RELEASE_STATUS=unknown
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.version=$APP_VERSION \
+      io.plusfolio.release-status=$RELEASE_STATUS \
+      org.opencontainers.image.revision=$VCS_REF \
+      org.opencontainers.image.source="https://github.com/ARS404/Plusfolio"
+ENV PLUSFOLIO_REVISION=$VCS_REF
 
 
 # The compiler contains no database/application sources, fixtures or credentials.
@@ -62,3 +72,11 @@ RUN printf 'plusfolio:x:65532:65532:Plusfolio:/tmp:/usr/sbin/nologin\n' >> /etc/
 USER 65532:65532
 ENV PLUSFOLIO_ISOLATED_TEX=1 PLUSFOLIO_TEX_SOCKET=/run/plusfolio-tex/compiler.sock
 CMD ["python","scripts/tex_service.py"]
+
+ARG APP_VERSION=unknown
+ARG RELEASE_STATUS=unknown
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.version=$APP_VERSION \
+      io.plusfolio.release-status=$RELEASE_STATUS \
+      org.opencontainers.image.revision=$VCS_REF \
+      org.opencontainers.image.source="https://github.com/ARS404/Plusfolio"
