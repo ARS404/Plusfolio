@@ -1,13 +1,24 @@
+FROM python:3.14-slim-bookworm AS model
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /opt/model-build
+COPY scripts/download_asset.py ./
+COPY embeddings/download.py embeddings/model.lock.json ./
+# Model preparation depends only on immutable artifacts and their downloader.
+RUN --mount=type=cache,id=plusfolio-embedding-artifacts,target=/var/cache/plusfolio-model,sharing=locked \
+    python download.py --directory /var/cache/plusfolio-model \
+ && mkdir -p /model && cp -a /var/cache/plusfolio-model/. /model/
+
 FROM python:3.14-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false HF_HUB_OFFLINE=1
 WORKDIR /opt/embeddings
 RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 libstdc++6 ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY embeddings/requirements.lock ./requirements.lock
 COPY scripts/download_asset.py scripts/install_locked.py ./
-RUN python install_locked.py requirements.lock
+RUN --mount=type=cache,id=plusfolio-wheels,target=/var/cache/plusfolio-wheels,sharing=locked \
+    python install_locked.py requirements.lock --cache-dir /var/cache/plusfolio-wheels
 COPY embeddings/download.py embeddings/model.lock.json ./
-# Fetch only while building. For offline deploy, copy the prepared /model or mirror this image in Russia.
-RUN python download.py --directory /model
+# Runtime package changes do not invalidate model preparation.
+COPY --from=model /model /model
 COPY embeddings/ ./
 USER 65532:65532
 ENV MODEL_DIRECTORY=/model EMBEDDING_THREADS=2

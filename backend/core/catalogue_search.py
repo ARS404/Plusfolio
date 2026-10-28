@@ -21,10 +21,12 @@ def topic_paths():
 
 
 def sync_entities(kind,rows,paths=None):
-    if kind=='topic' and paths is None:paths=topic_paths()
     def entries():
+        topic_names=paths
         for row in rows:
-            if kind=='topic':text=paths.get(row.pk,'')
+            if kind=='topic':
+                if topic_names is None:topic_names=topic_paths()
+                text=topic_names.get(row.pk,'')
             elif kind=='circle':text='\n'.join([row.name,row.description,row.city,row.region])
             else:text='\n'.join([row.title,row.description])
             yield {'kind':kind,'object_id':row.pk,**text_fields(text)}

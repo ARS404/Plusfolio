@@ -1,26 +1,29 @@
 FROM node:24-bookworm-slim AS frontend
 WORKDIR /src/frontend
 COPY frontend/package*.json ./
-RUN npm ci --no-audit --no-fund
+RUN --mount=type=cache,id=plusfolio-npm,target=/root/.npm,sharing=locked \
+    npm ci --prefer-offline --no-audit --no-fund
 COPY frontend/ ./
 RUN npm test && npm run build
 
 FROM python:3.14-slim-bookworm AS prepared
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 LANG=C.UTF-8
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg age fonts-dejavu-core fontconfig libfontconfig1 libfreetype6 \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates age fonts-dejavu-core fontconfig libfontconfig1 libfreetype6 \
  && install -d /usr/share/postgresql-common/pgdg \
- && curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+ && python -c "import urllib.request; urllib.request.urlretrieve('https://www.postgresql.org/media/keys/ACCC4CF8.asc', '/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc')" \
  && echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main' > /etc/apt/sources.list.d/pgdg.list \
  && apt-get update && apt-get install -y --no-install-recommends postgresql-client-17 \
  && rm -rf /var/lib/apt/lists/*
-COPY requirements*.lock ./
+COPY requirements.lock requirements-server.lock ./
 COPY scripts/download_asset.py scripts/install_locked.py scripts/
-RUN python scripts/install_locked.py requirements-server.lock
+RUN --mount=type=cache,id=plusfolio-wheels,target=/var/cache/plusfolio-wheels,sharing=locked \
+    python scripts/install_locked.py requirements-server.lock --cache-dir /var/cache/plusfolio-wheels
 COPY scripts/setup_tex.py scripts/setup_tex.py
 COPY backend/core/tex_templates/ backend/core/tex_templates/
 RUN --mount=type=cache,id=plusfolio-tectonic-0.17.0-v33,target=/var/cache/plusfolio-tex,sharing=locked \
-    PLUSFOLIO_TEX_SHARED_CACHE=/var/cache/plusfolio-tex python scripts/setup_tex.py
+    PLUSFOLIO_TEX_SHARED_CACHE=/var/cache/plusfolio-tex python scripts/setup_tex.py \
+ && chown -R 65532:65532 /app/.local
 
 FROM prepared AS application
 COPY backend/ backend/
@@ -30,11 +33,11 @@ COPY docs/ docs/
 COPY embeddings/ embeddings/
 COPY frontend/ frontend/
 COPY deploy/ deploy/
-COPY README.md requirements.txt compose.yml .dockerignore .gitignore ./
+COPY README.md requirements.txt requirements-tex.lock compose.yml .dockerignore .gitignore ./
 COPY .github/ .github/
 COPY --from=frontend /src/frontend/dist frontend/dist
 RUN mkdir -p /run/plusfolio-tex /backups /deployment \
- && chown -R 65532:65532 /app/.local /run/plusfolio-tex /backups
+ && chown 65532:65532 /run/plusfolio-tex /backups
 RUN printf 'plusfolio:x:65532:65532:Plusfolio:/tmp:/usr/sbin/nologin\n' >> /etc/passwd && printf 'plusfolio:x:65532:\n' >> /etc/group
 USER 65532:65532
 ENV PLUSFOLIO_DEMO=0

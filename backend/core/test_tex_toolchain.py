@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import hashlib
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -33,6 +35,32 @@ class PortableToolchainTests(SimpleTestCase):
                     self.assertEqual(json.loads(data.read('toolchain-manifest.json'))['contract_id'],first['contract_id'])
             (cache/'resource').write_bytes(b'changed font')
             self.assertNotEqual(first['contract_id'],build_contract(root,cache)['contract_id'])
+
+    def test_warm_contract_reuses_digests_and_invalidates_preserved_mtime_and_replacements(self):
+        from .tex_toolchain import _file_digest
+        _file_digest.cache_clear()
+        with TemporaryDirectory() as directory:
+            root=Path(directory)
+            for name in SOURCE_FILES:
+                path=root/name;path.parent.mkdir(parents=True,exist_ok=True)
+                path.write_text("VERSION='0.17.0'\n" if name=='scripts/setup_tex.py' else 'trusted source')
+            cache=root/'.local/tectonic-cache';cache.mkdir(parents=True)
+            resource=cache/'resource';resource.write_bytes(b'first')
+            first=build_contract(root,cache)
+            digest=hashlib.file_digest
+            with patch('core.tex_toolchain.hashlib.file_digest',wraps=digest) as reads:
+                self.assertEqual(first,build_contract(root,cache))
+            self.assertEqual(reads.call_count,0)
+            info=resource.stat();resource.write_bytes(b'other')
+            os.utime(resource,ns=(info.st_atime_ns,info.st_mtime_ns))
+            changed=build_contract(root,cache)
+            self.assertNotEqual(first['contract_id'],changed['contract_id'])
+            replacement=cache/'replacement';replacement.write_bytes(b'final')
+            os.utime(replacement,ns=(info.st_atime_ns,info.st_mtime_ns));replacement.replace(resource)
+            self.assertNotEqual(changed['contract_id'],build_contract(root,cache)['contract_id'])
+            extra=cache/'extra';extra.write_bytes(b'extra')
+            self.assertIn('.local/tectonic-cache/extra',build_contract(root,cache)['files'])
+            extra.unlink();self.assertNotIn('.local/tectonic-cache/extra',build_contract(root,cache)['files'])
 
     def test_draft_preview_uses_the_same_project_builder_without_a_database(self):
         path=settings.BASE_DIR/'scripts/preview_tex.py'

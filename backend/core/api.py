@@ -13,7 +13,11 @@ from django.views.decorators.http import require_http_methods
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception
-from .models import *
+from .models import (
+    AnalystGrant, AuditEvent, Circle, CircleTeacher, EmailOutbox, Enrollment,
+    Invitation, Problem, ROLES, Solve, Student, Tag, Topic, TopicCatalogVersion,
+    User, WorksheetIssue,
+)
 from . import services as s
 from . import filters as f
 from . import queries as read

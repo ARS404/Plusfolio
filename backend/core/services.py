@@ -8,7 +8,12 @@ from django.db import transaction
 from django.db.models import Q, Max, F, Exists, OuterRef
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, NotFound
-from .models import *
+from .models import (
+    AnalystGrant, Assignment, AuditEvent, Circle, CircleTeacher, Discussion,
+    EmailOutbox, Enrollment, Invitation, Problem, Solve, Student, Tag, Teacher,
+    Topic, TopicCatalogVersion, User, Worksheet, WorksheetDocument,
+    WorksheetIssue, WorksheetItem,
+)
 
 RANK={'student':1,'teacher':2,'analyst':3,'admin':4}
 def admin(user): return 'admin' in user.roles

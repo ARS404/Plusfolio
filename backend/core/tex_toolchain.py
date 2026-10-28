@@ -3,6 +3,7 @@ import ast
 import hashlib
 import json
 import os
+from functools import lru_cache
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 import zipfile
@@ -28,11 +29,20 @@ def toolchain_files(root=None, cache_root=None):
     return {**sources,**resources}
 
 
-def build_contract(root=None, cache_root=None):
-    files=toolchain_files(root,cache_root)
-    hashes={}
+@lru_cache(maxsize=4096)
+def _file_digest(path, signature):
+    # The signature includes ctime/inode, so same-size edits and atomic replacements
+    # invalidate a cached digest even if a tool restores the old mtime.
+    with path.open('rb') as source:
+        return hashlib.file_digest(source, 'sha256').hexdigest()
+
+
+def _contract(files):
+    hashes={};total_bytes=0
     for name,path in sorted(files.items()):
-        with path.open('rb') as source:hashes[name]=hashlib.file_digest(source,'sha256').hexdigest()
+        info=path.stat();total_bytes+=info.st_size
+        signature=(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+        hashes[name]=_file_digest(path.absolute(),signature)
     # Read the pinned version from the same installer used by the service.
     tree=ast.parse(files['scripts/setup_tex.py'].read_text())
     version=next(ast.literal_eval(node.value) for node in tree.body if isinstance(node,ast.Assign)
@@ -42,7 +52,7 @@ def build_contract(root=None, cache_root=None):
     identity={'compiler':compiler,'template_version':TEMPLATE,'files':hashes}
     digest=hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest()
     return {**identity,'contract_id':digest,'archive_url':'/api/v1/tex/toolchain/archive',
-            'archive_bytes_uncompressed':sum(path.stat().st_size for path in files.values()),
+            'archive_bytes_uncompressed':total_bytes,
             'prepare_command':'python scripts/preview_tex.py --prepare --expected-contract <CONTRACT_ID>',
             'preview_command':'python scripts/preview_tex.py --input draft.json --output review-v1 --expected-contract <CONTRACT_ID>',
             'requirements':['Python 3.12+','macOS arm64: sandbox-exec; Linux x86_64/aarch64: bubblewrap',
@@ -51,15 +61,20 @@ def build_contract(root=None, cache_root=None):
                       'max_open_files':256,'linux_address_space_bytes':1073741824,'max_problems':300}}
 
 
+def build_contract(root=None, cache_root=None):
+    return _contract(toolchain_files(root,cache_root))
+
+
 def toolchain_archive():
-    contract=build_contract()
+    files=toolchain_files()
+    contract=_contract(files)
     directory=settings.LOCAL_DIR/'tex-toolchains';directory.mkdir(mode=0o700,exist_ok=True)
     target=directory/(contract['contract_id']+'.zip')
     if not target.exists():
         with NamedTemporaryFile(dir=directory,suffix='.zip',delete=False) as temp:name=temp.name
         try:
             with zipfile.ZipFile(name,'w',zipfile.ZIP_DEFLATED) as archive:
-                for relative,path in toolchain_files().items():archive.write(path,relative)
+                for relative,path in files.items():archive.write(path,relative)
                 archive.writestr('toolchain-manifest.json',json.dumps(contract,ensure_ascii=False,indent=2))
             os.chmod(name,0o600);os.replace(name,target)
         finally:Path(name).unlink(missing_ok=True)

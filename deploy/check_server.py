@@ -86,7 +86,13 @@ try:
     compose('exec','-T','web','python','backend/manage.py','shell','-c',
         "from core.models import User,Circle,ApiToken; from core import services as s; s.invite(User.objects.filter(is_superuser=True).first(),'pending@delivery.example.test','student',Circle.objects.first()); ApiToken.objects.update(revoked_at=None)")
     compose('exec','-T','backup','python','-c',"from pathlib import Path; import os; old=Path('/backups/plusfolio-20000101T000000000000Z.tar.gz.age'); old.write_bytes(b'old'); os.utime(old,(946684800,946684800)); Path('/backups/foreign-canary.txt').write_bytes(b'keep')")
-    compose('exec','-T','backup','python','scripts/server_backup.py')
+    # A restart may still be creating its automatic snapshot. Obtain a new,
+    # completed manual snapshot before checking retention and restoring it.
+    compose('exec','-T','backup','python','-c',
+        "import time; from scripts.server_backup import backup; deadline=time.monotonic()+180\n"
+        "while backup() is None:\n"
+        "    if time.monotonic()>deadline: raise RuntimeError('Backup stayed busy')\n"
+        "    time.sleep(2)\n")
     compose('exec','-T','backup','python','-c',"from pathlib import Path; assert not Path('/backups/plusfolio-20000101T000000000000Z.tar.gz.age').exists(); assert Path('/backups/foreign-canary.txt').read_bytes()==b'keep'; assert len(list(Path('/backups').glob('*.age')))>=2")
     output=server.STATE/'test-backups';output.mkdir(exist_ok=True)
     compose('cp','backup:/backups/.',str(output))
@@ -102,7 +108,8 @@ try:
         server.run(argparse.Namespace(command='restore-backup',file=str(newest),key=str(original_state/'backup.key'),into=str(restored),image=values['PLUSFOLIO_APP_IMAGE']))
     finally:server.STATE=original_state
     recovered=restored/'source'
-    server.server_host.build_images(server.docker,values,recovered,targets=['web'])
+    if not args.skip_build:
+        server.server_host.build_images(server.docker,values,recovered,targets=['web'])
     server.docker('run','--rm','--network','none','--cpus','0.3','--memory','512m','--memory-swap','512m','--pids-limit','64','-e','PLUSFOLIO_DEMO=1',values['PLUSFOLIO_APP_IMAGE'],'python','backend/manage.py','check')
     restore_db='restore_check_'+str(time.time_ns())
     compose('exec','-T','db','createdb','-U','postgres','--owner=plusfolio',restore_db)

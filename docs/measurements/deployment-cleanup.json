@@ -1,0 +1,47 @@
+{
+  "measured_on": "2026-10-28",
+  "tex_contract": {
+    "environment": "Local macOS arm64, 10 contract reads of the prepared resource set",
+    "before": {
+      "calls": 10,
+      "median_ms": 39.85,
+      "file_hashes": 4670,
+      "files": 467,
+      "resource_bytes": 49028967
+    },
+    "after": {
+      "calls": 10,
+      "median_ms": 10.89,
+      "file_hashes": 467,
+      "files": 467,
+      "resource_bytes": 49029447
+    }
+  },
+  "server_images": {
+    "environment": "Linux arm64 VM, dedicated BuildKit builder capped at 1 CPU / 1 GiB RAM; 2 GiB cache GC target",
+    "baseline": "Previously verified shared-host deployment image (7a0ebe5)",
+    "docker_image_ls_before": "767MB",
+    "docker_image_ls_after": "652MB",
+    "docker_image_inspect_Size_before": 164587049,
+    "docker_image_inspect_Size_after": 136560658,
+    "removed_ownership_layer_docker_history": "76MB",
+    "full_repeat_build_seconds": 3.0,
+    "model_stage_repeat_seconds": 1.76,
+    "method": "Repeated unchanged bake --load of web, tex and embeddings with ready cache; no package/model downloads in final repeat. Image ls and inspect report different Docker storage measures."
+  },
+  "limitations": "Local measurements, not a hosting SLA. Initial builds need public downloads. The bounded BuildKit cache can evict artifacts.",
+  "verification": {
+    "sqlite": {
+      "tests": 263,
+      "result": "OK"
+    },
+    "postgresql_regression": {
+      "tests": 76,
+      "skipped": 1,
+      "result": "OK"
+    },
+    "linux_download_tests": 7,
+    "linux_shared_host_tests": 18,
+    "deployment": "HTTPS, SMTP invitation, CPU search, TeX/TikZ, restart, backup retention and database restore verified; neighbor unchanged"
+  }
+}

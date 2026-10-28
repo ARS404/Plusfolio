@@ -42,6 +42,16 @@ class CatalogueSearchTests(TestCase):
         self.assertEqual(response.status_code,200,response.data)
         return [hit['entity']['id'] for hit in response.data['results']]
 
+    def test_idle_reconcile_does_not_load_complete_topic_paths(self):
+        search.reconcile()
+        with patch('core.catalogue_search.topic_paths', side_effect=AssertionError('No missing topics')):
+            search.reconcile()
+        Topic.objects.bulk_create([Topic(name='Missing topic',parent=self.root)])
+        with patch('core.catalogue_search.topic_paths', wraps=search.topic_paths) as paths:
+            search.reconcile()
+        self.assertEqual(paths.call_count,1)
+        self.assertTrue(CatalogueSearchDocument.objects.filter(kind='topic',text='Missing topic').exists())
+
     @patch('core.search.query_embedding')
     def test_semantic_metadata_and_scope_before_ranking(self,embedding):
         vector=np.zeros(384,dtype=np.float32);vector[0]=1;embedding.return_value=vector
