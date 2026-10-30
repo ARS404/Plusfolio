@@ -152,7 +152,8 @@ def render_pdf(project,diagnostics=None):
                 raise ValidationError('Сборка TeX превысила 20 секунд. Упростите рисунок или исходник.')
             if diagnostics is not None:
                 log=output.decode(errors='replace')
-                if (work/'main.log').exists():log+='\n'+(work/'main.log').read_text(errors='replace')[:2*1024*1024]
+                if (work/'main.log').exists():
+                    with (work/'main.log').open(errors='replace') as stream:log+='\n'+stream.read(2*1024*1024)
                 warnings=[line.strip()[:500] for line in log.splitlines() if any(marker in line.lower() for marker in ['overfull','underfull','missing character','warning:'])]
                 diagnostics.update(cache_hit=False,warnings=list(dict.fromkeys(warnings))[:100])
             pdf=work/'main.pdf'

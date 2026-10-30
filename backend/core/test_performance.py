@@ -64,6 +64,9 @@ class QueryBudgetTests(TestCase):
         self.assertGreaterEqual(len(self.request(self.teacher,'/api/materials/worksheet',5)),40)
         self.assertGreaterEqual(len(self.request(self.student,'/api/my-materials/worksheet',3)),40)
         self.assertEqual(len(self.request(self.teacher,f'/api/circles/{self.circles[0].pk}/issues',4)),40)
+        issue=self.circles[0].issues.first()
+        for user,budget in [(self.teacher,8),(self.student,9)]:
+            self.assertEqual(len(self.request(user,f'/api/circles/{self.circles[0].pk}/issues/{issue.pk}',budget)['problems']),80)
 
     def test_repeated_journal_tasks_keep_query_budget_and_closed_solutions(self):
         result=self.request(self.student,f'/api/circles/{self.circles[0].pk}/journal',12)

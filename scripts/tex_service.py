@@ -35,7 +35,8 @@ def compile_project(project,diagnostic=False):
         data=pdf.read_bytes()
         if not data.startswith(b'%PDF-'):raise ValueError('Invalid PDF')
         log=output.decode(errors='replace')
-        if (work/'main.log').exists():log+='\n'+(work/'main.log').read_text(errors='replace')[:2*1024*1024]
+        if (work/'main.log').exists():
+            with (work/'main.log').open(errors='replace') as stream:log+='\n'+stream.read(2*1024*1024)
         warnings=[line.strip()[:500] for line in log.splitlines() if any(word in line.lower() for word in ['overfull','underfull','missing character','warning:'])]
         return {'pdf':base64.b64encode(data).decode(),'warnings':list(dict.fromkeys(warnings))[:100]}
 

@@ -246,7 +246,7 @@ def personal_issue(user,pk):
 
 @api_view(['GET'])
 def issue_detail(request,pk,issue_id):
-    circle=s.get_circle(request.user,pk);issue=circle.issues.select_related('worksheet','circle').get(pk=issue_id)
+    circle=s.get_circle(request.user,pk);issue=circle.issues.select_related('worksheet__document','worksheet__author','circle').prefetch_related('worksheet__tags').get(pk=issue_id)
     return Response({**material_data(issue.worksheet,request.user,True,circle),**issue_data(issue)})
 
 @api_view(['GET'])
