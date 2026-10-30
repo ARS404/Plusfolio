@@ -25,7 +25,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 AUTH_USER_MODEL = 'core.User'
 DATABASES = {'default': {'ENGINE':'django.db.backends.sqlite3','NAME':LOCAL_DIR/'demo.sqlite3','OPTIONS':{'timeout':20}}}
 if os.environ.get('POSTGRES_HOST'):
-    DATABASES = {'default': {'ENGINE':'django.db.backends.postgresql','HOST':os.environ['POSTGRES_HOST'],'NAME':os.environ.get('POSTGRES_DB','plusfolio'),'USER':os.environ.get('POSTGRES_USER','plusfolio'),'PASSWORD':secret('POSTGRES_PASSWORD'),'PORT':os.environ.get('POSTGRES_PORT','5432')}}
+    DATABASES = {'default': {'ENGINE':'django.db.backends.postgresql','HOST':os.environ['POSTGRES_HOST'],'NAME':os.environ.get('POSTGRES_DB','plusfolio'),'USER':os.environ.get('POSTGRES_USER','plusfolio'),'PASSWORD':secret('POSTGRES_PASSWORD'),'PORT':os.environ.get('POSTGRES_PORT','5432'),'DISABLE_SERVER_SIDE_CURSORS':os.environ.get('POSTGRES_DISABLE_SERVER_SIDE_CURSORS','0')=='1'}}
 if not DEMO and DATABASES['default']['ENGINE'].endswith('sqlite3'):
     raise RuntimeError('Production requires PostgreSQL')
 AUTH_PASSWORD_VALIDATORS = [{'NAME':'django.contrib.auth.password_validation.MinimumLengthValidator','OPTIONS':{'min_length':12}},{'NAME':'django.contrib.auth.password_validation.CommonPasswordValidator'}]

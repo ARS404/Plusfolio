@@ -16,15 +16,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
  && echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main' > /etc/apt/sources.list.d/pgdg.list \
  && apt-get update && apt-get install -y --no-install-recommends postgresql-client-17 \
  && rm -rf /var/lib/apt/lists/*
-COPY requirements.lock requirements-server.lock ./
-COPY scripts/download_asset.py scripts/install_locked.py scripts/
-RUN --mount=type=cache,id=plusfolio-wheels,target=/var/cache/plusfolio-wheels,sharing=locked \
-    python scripts/install_locked.py requirements-server.lock --cache-dir /var/cache/plusfolio-wheels
+COPY scripts/download_asset.py scripts/download_asset.py
 COPY scripts/setup_tex.py scripts/setup_tex.py
 COPY backend/core/tex_templates/ backend/core/tex_templates/
 RUN --mount=type=cache,id=plusfolio-tectonic-0.17.0-v33,target=/var/cache/plusfolio-tex,sharing=locked \
     PLUSFOLIO_TEX_SHARED_CACHE=/var/cache/plusfolio-tex python scripts/setup_tex.py \
  && chown -R 65532:65532 /app/.local
+
+COPY requirements.lock requirements-server.lock ./
+COPY scripts/download_asset.py scripts/install_locked.py scripts/
+RUN --mount=type=cache,id=plusfolio-wheels,target=/var/cache/plusfolio-wheels,sharing=locked \
+    python scripts/install_locked.py requirements-server.lock --cache-dir /var/cache/plusfolio-wheels
 
 FROM prepared AS application
 COPY backend/ backend/

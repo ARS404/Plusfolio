@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Streaming authenticated age backups: database, source, runtime, model and configuration."""
-import argparse,fcntl,hashlib,io,json,os,re,stat,subprocess,tarfile,time
+import argparse,fcntl,hashlib,io,json,os,re,stat,subprocess,sys,tarfile,time
 from datetime import datetime,timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'scripts'))
 
 
 class HashedReader:
@@ -54,6 +55,9 @@ def backup():
         try:os.nice(10)
         except OSError:pass
         result=_backup()
+        from server_s3 import upload
+        remote=upload(result)
+        if remote:print('Remote encrypted backup verified: '+remote,flush=True)
         report=prune_backups(directory,policy)
         (directory/'last-success').write_text(str(time.time()))
         print('Backup retention: '+json.dumps(report),flush=True)
@@ -68,7 +72,7 @@ def _backup():
     target=directory/f'plusfolio-{stamp}.tar.gz.age';temporary=target.with_suffix('.partial')
     from release import build_metadata
     manifest={'release':build_metadata(ROOT),'format':'plusfolio-server-v1','created_at':datetime.now(timezone.utc).isoformat(),'files':{},'image':os.environ.get('RELEASE_ID','local-build')}
-    with TemporaryDirectory(prefix='plusfolio-backup-') as scratch:
+    with TemporaryDirectory(prefix='.plusfolio-dump-',dir=directory) as scratch:
         dump=Path(scratch)/'database.dump'
         env=os.environ.copy();env['PGPASSWORD']=Path(env['POSTGRES_PASSWORD_FILE']).read_text().strip()
         with dump.open('wb') as stream:
@@ -89,7 +93,7 @@ def _backup():
         if config.is_file() and not config.is_symlink():
             paths['source/.deploy/env']=config
         for path in Path('/run/secrets').glob('*'):
-            if path.is_file() and path.name in {'app_key','postgres_password','db_password','smtp_password','admin_password'}:
+            if path.is_file() and path.name in {'app_key','postgres_password','db_password','smtp_password','admin_password','db_ca','backup_s3_credentials'}:
                 paths['source/.deploy/secrets/'+path.name]=path
         try:
             with temporary.open('wb') as output:
@@ -160,6 +164,7 @@ if __name__=='__main__':
         if not args.key:parser.error('--key required')
         verify(args.verify,args.key,args.into,args.empty_output)
     else:
+        if args.watch:Path('/backups/last-success').unlink(missing_ok=True)
         while True:
             try:backup()
             except Exception as exc:

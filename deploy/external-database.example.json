@@ -1,0 +1,16 @@
+{
+  "public_url": "https://plusfolio.example.ru",
+  "admin_email": "admin@example.ru",
+  "smtp_host": "postbox.cloud.yandex.net",
+  "smtp_user": "SET_POSTBOX_SMTP_LOGIN",
+  "smtp_from": "invite@example.ru",
+  "database": {
+    "host": "SET_POSTGRESQL_FQDN",
+    "port": 6432,
+    "name": "plusfolio",
+    "user": "plusfolio",
+    "password_file": "/home/plusfolio/private/database-password",
+    "ca_file": "/home/plusfolio/private/database-ca.pem",
+    "disable_server_side_cursors": true
+  }
+}

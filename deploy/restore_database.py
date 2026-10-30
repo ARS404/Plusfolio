@@ -13,7 +13,7 @@ if settings.DEMO:raise RuntimeError('This restore command is only for the server
 with connection.cursor() as cursor:
     cursor.execute("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='core_user')")
     if cursor.fetchone()[0]:raise RuntimeError('Refusing to overwrite an initialized database; use a fresh deployment')
-with TemporaryDirectory(prefix='plusfolio-restore-') as temporary:
+with TemporaryDirectory(prefix='plusfolio-restore-',dir=settings.LOCAL_DIR) as temporary:
     dump=Path(temporary)/'database.dump'
     with dump.open('wb') as target:
         import shutil;shutil.copyfileobj(sys.stdin.buffer,target,1024*1024)

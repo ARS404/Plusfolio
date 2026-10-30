@@ -1,0 +1,10 @@
+# Select with TF_CLI_CONFIG_FILE; does not modify the operator's global settings.
+provider_installation {
+  network_mirror {
+    url     = "https://terraform-mirror.yandexcloud.net/"
+    include = ["registry.terraform.io/*/*"]
+  }
+  direct {
+    exclude = ["registry.terraform.io/*/*"]
+  }
+}

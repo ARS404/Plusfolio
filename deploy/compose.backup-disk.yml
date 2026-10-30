@@ -1,0 +1,7 @@
+# Local staging/retention can live on a different disk from PostgreSQL and Docker.
+volumes:
+  backups:
+    driver_opts:
+      type: none
+      o: bind
+      device: ${BACKUP_DIR:?Set existing BACKUP_DIR}

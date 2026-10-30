@@ -1,0 +1,7 @@
+# Existing directory on a separately mounted SSD. Docker must not create it.
+volumes:
+  database:
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DB_DATA_DIR:?Set existing DB_DATA_DIR}

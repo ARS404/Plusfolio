@@ -24,6 +24,8 @@ jobs:
         run: python3 deploy/check_server.py --keep
       - name: Verify download integrity and immutable dependency locks
         run: docker compose --env-file .deploy/env -f compose.yml run --rm --no-deps web python deploy/test_downloads.py
+      - name: Verify configurable storage, offsite backups and immutable releases
+        run: docker compose --env-file .deploy/env -f compose.yml run --rm --no-deps web python deploy/test_cloud_deploy.py
       - name: Run backend regression suite in a disposable SQLite test database
         run: >-
           docker compose --env-file .deploy/env -f compose.yml -f deploy/compose.test.yml run --rm --no-deps

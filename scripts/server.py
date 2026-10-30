@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One-command server setup. Secrets are read from prompts/files, never CLI arguments."""
 import argparse,getpass,hashlib,json,os,re,secrets,subprocess,sys,time,urllib.parse,urllib.request,ssl
-import server_host
+import server_host,server_storage
 from email.utils import parseaddr
 from pathlib import Path
 from collections.abc import Mapping
@@ -19,12 +19,23 @@ else:
 """
 
 
+BACKUP_BEFORE_UPDATE_CODE = """import sys,time
+sys.path.insert(0,'scripts')
+from server_backup import backup
+until=time.monotonic()+900
+while backup() is None:
+    if time.monotonic()>until:raise RuntimeError('Backup stayed busy; update cancelled')
+    time.sleep(2)
+"""
+
+
 def docker(*args,**kwargs):return subprocess.run(['docker',*args],cwd=ROOT,check=True,**kwargs)
 
 def compose(*args,**kwargs):
     values=read_env()
     kwargs.setdefault('env',{**os.environ,**{key:str(value) for key,value in values.items()}})
-    return subprocess.run(['docker','compose','--project-name',values['COMPOSE_PROJECT_NAME'],'--env-file',str(STATE/'env'),'-f',str(ROOT/'compose.yml'),*args],cwd=ROOT,check=True,**kwargs)
+    files=[argument for path in server_storage.compose_files(values,ROOT) for argument in ['-f',str(path)]]
+    return subprocess.run(['docker','compose','--project-name',values['COMPOSE_PROJECT_NAME'],'--env-file',str(STATE/'env'),*files,*args],cwd=ROOT,check=True,**kwargs)
 
 def write_env(values: Mapping[str, object], path: Path | None = None) -> None:
     target = STATE/'env' if path is None else path
@@ -78,7 +89,8 @@ def configure(config=None):
     values={'INSTANCE_ID':secrets.token_hex(16),'COMPOSE_PROJECT_NAME':project,'PUBLIC_URL':url,'PUBLIC_HOST':parsed.hostname,'ADMIN_EMAIL':admin,'ADMIN_NAME':admin_name,
         'SMTP_HOST':host,'SMTP_PORT':port,'SMTP_USER':user,'SMTP_FROM':sender,'SMTP_TLS':tls,'SMTP_SSL':ssl_mode,
         'LOCAL_PORT':local_port}
-    values=server_host.shared_values(values)
+    extra,files=server_storage.configuration(data)
+    values=server_host.shared_values({**values,**extra})
     (STATE/'secrets').mkdir(mode=0o700,exist_ok=True)
     for name,value in {'app_key':secrets.token_urlsafe(64),'postgres_password':secrets.token_urlsafe(32),
         'db_password':secrets.token_urlsafe(32),'admin_password':password,'smtp_password':smtp_password or ''}.items():
@@ -87,6 +99,10 @@ def configure(config=None):
         # Host parent directories are 0700. Container-local Compose secrets are readable
         # by its unprivileged application UID, without exposing parent paths on host.
         path.chmod(0o444)
+    for name,source in files.items():
+        path=STATE/'secrets'/name
+        if path.exists():path.chmod(0o600)
+        path.write_bytes(source.read_bytes());path.chmod(0o444)
     write_env(values);return values
 
 
@@ -126,6 +142,8 @@ def preflight(values,require_build=False):
     server_host.tools_ready(require_build)
     containers=server_host.project_containers(docker,values,ROOT)
     config=json.loads(compose('config','--format','json',stdout=subprocess.PIPE).stdout)
+    server_storage.validate(values)
+    server_storage.check_paths(values,docker,config)
     budget=server_host.check_limits(config)
     published=config['services']['web']['ports']
     if len(published)!=1 or str(published[0]['published'])!=str(values['LOCAL_PORT']):raise RuntimeError('Порт в Compose не совпадает с LOCAL_PORT')
@@ -146,23 +164,43 @@ def verify_local(values):
 
 
 def run(args):
-    require_build=args.command in {'init','update'} and not getattr(args,'no_build',False)
+    release=getattr(args,'release',None)
+    require_build=args.command in {'init','update'} and not getattr(args,'no_build',False) and not release
+    if args.command=='publish-images':
+        from server_images import publish
+        publish(docker,ROOT,args.registry,args.output,args.platform,args.cache_registry);return
+    if args.command=='fetch-backup':
+        from server_s3 import download
+        if args.config:
+            values,files=server_storage.configuration(json.loads(Path(args.config).read_text()))
+            values['BACKUP_S3_CREDENTIALS_FILE']=str(files['backup_s3_credentials'])
+        else:
+            values=read_env();values['BACKUP_S3_CREDENTIALS_FILE']=str(STATE/'secrets/backup_s3_credentials')
+        try:download(args.uri,args.file,values)
+        except (ValueError,FileExistsError):raise
+        except Exception:raise RuntimeError('Не удалось скачать S3-бэкап. Проверьте доступ к бакету и настройки восстановления') from None
+        print('Encrypted backup downloaded; verify it before restoring.');return
     if args.command=='init':
         server_host.tools_ready(require_build)
         values=configure(args.config)
     elif (STATE/'env').exists():values=read_env()
-    elif args.command in {'verify-backup','restore-backup'}:values={}
+    elif args.command in {'verify-backup','restore-backup','import-images'}:values={}
     elif args.command=='doctor':
         server_host.tools_ready(True);server_host.port_available('18080',[])
         print('Docker/Compose/Buildx доступны; локальный порт 18080 свободен. Системные настройки не изменены.');return
     else:raise ValueError('Сначала выполните init: конфигурация сервера не найдена')
     if args.command in {'init','up','update','doctor'}:
         values=server_host.shared_values(values,legacy=values.get('DEPLOYMENT_MODE')!='shared')
+        if release:
+            from server_images import pull
+            values.update(pull(docker,ROOT,release))
         containers,budget=preflight(values,require_build)
         print('Лимиты служб: '+str(budget['cpus'])+' CPU, '+str(budget['memory_mib'])+' МиБ памяти (сумма верхних границ).',flush=True)
         if args.command=='doctor':return
-        write_env(values)
         if require_build:server_host.build_images(docker,values,ROOT)
+        if args.command=='update' and any(item.get('State',{}).get('Running') and (item.get('Config',{}).get('Labels') or {}).get('com.docker.compose.service')=='web' for item in containers):
+            compose('exec','-T','backup','python','-c',BACKUP_BEFORE_UPDATE_CODE)
+        write_env(values)
         backup_key(values)
         # Migrate only this checkout's former edge; never touch another project's proxy.
         for item in containers:
@@ -174,6 +212,8 @@ def run(args):
         print('Plusfolio ready locally: http://127.0.0.1:'+values['LOCAL_PORT'])
         print('Connect the existing HTTPS proxy for '+values['PUBLIC_URL']+'; see proxy-config nginx|caddy|traefik, then check-public.')
         print('Save .deploy/backup.key separately; encrypted backups and retention are running.')
+    elif args.command=='import-images':
+        server_host.tools_ready();operate(args,values)
     elif args.command in {'status','logs','backup','prune-backups','download-backup','export-images','restore-database','stop','version'}:
         server_host.tools_ready()
         server_host.project_containers(docker,values,ROOT)
@@ -201,9 +241,20 @@ def operate(args,values):
     elif args.command=='export-images':
         output=Path(args.file).resolve()
         result=compose('config','--images',stdout=subprocess.PIPE)
-        names=sorted(set(result.stdout.decode().split()))
-        # Preserve image tags so a fresh host can use Compose after image load.
-        docker('image','save','--output',str(output),*names);output.chmod(0o600)
+        from server_images import export_archive
+        export_archive(docker,result.stdout.decode().split(),output)
+    elif args.command=='import-images':
+        from server_images import import_archive,IMAGES,TARGETS
+        aliases=import_archive(docker,args.file)
+        if values:
+            config=json.loads(compose('config','--format','json',stdout=subprocess.PIPE).stdout)
+            services={TARGETS[kind]:key for kind,key in IMAGES.items()}
+            services.update(db='PLUSFOLIO_DB_IMAGE',redis='PLUSFOLIO_REDIS_IMAGE')
+            for name,key in services.items():
+                image=config['services'].get(name,{}).get('image')
+                if image in aliases:values[key]=aliases[image]
+            write_env(values)
+        print(json.dumps({'recovery_images':aliases}))
     elif args.command=='restore-backup':
         path=Path(args.file).resolve();key=Path(args.key or STATE/'backup.key').resolve();destination=Path(args.into).resolve()
         if destination.exists():raise ValueError('Restore destination must not exist')
@@ -213,7 +264,7 @@ def operate(args,values):
             getattr(args,'image',None) or values.get('PLUSFOLIO_APP_IMAGE','plusfolio-app:local'),'python','scripts/server_backup.py','--verify','/backup.age','--key','/backup.key','--into','/output','--empty-output')
         import shutil
         config=destination/'source/.deploy/env'
-        restored=read_env(config)
+        restored=server_storage.for_restore(read_env(config))
         restored['COMPOSE_PROJECT_NAME']='plusfolio-restored-'+str(time.time_ns())
         restored['INSTANCE_ID']=secrets.token_hex(16)
         restored=server_host.shared_values(restored,legacy=restored.get('DEPLOYMENT_MODE')!='shared')
@@ -225,7 +276,8 @@ def operate(args,values):
     elif args.command=='restore-database':
         running=compose('ps','--status','running','--services',stdout=subprocess.PIPE).stdout.decode().split()
         if any(name not in {'db','redis'} for name in running):raise ValueError('Stop application workers before restoring; only a fresh database is allowed')
-        compose('up','--detach','--wait','--wait-timeout','120','db','redis')
+        services=['db','redis'] if values.get('POSTGRES_HOST','db')=='db' else ['redis']
+        compose('up','--detach','--wait','--wait-timeout','120',*services)
         with Path(args.file).open('rb') as stream:
             compose('run','--rm','--no-deps','-T','web','python','deploy/restore_database.py',stdin=stream)
         print('Restore complete. Run up to start the recovered service.')
@@ -235,7 +287,10 @@ def operate(args,values):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);sub=parser.add_subparsers(dest='command',required=True)
     init=sub.add_parser('init');init.add_argument('--no-build',action='store_true');init.add_argument('--config',help='JSON file for unattended setup; secrets never go in CLI arguments')
-    update=sub.add_parser('update');update.add_argument('--no-build',action='store_true')
+    init.add_argument('--release',type=Path,help='Pull a verified digest-pinned images manifest; no server build')
+    update=sub.add_parser('update');update.add_argument('--no-build',action='store_true');update.add_argument('--release',type=Path)
+    publish=sub.add_parser('publish-images');publish.add_argument('--registry',required=True);publish.add_argument('--output',type=Path,required=True);publish.add_argument('--platform',default='linux/amd64');publish.add_argument('--cache-registry')
+    fetch=sub.add_parser('fetch-backup');fetch.add_argument('uri');fetch.add_argument('file',type=Path);fetch.add_argument('--config',help='Private recovery JSON containing backup_s3 settings')
     for name in ['up','status','backup','prune-backups','stop','doctor','check-public','version']:sub.add_parser(name)
     proxy=sub.add_parser('proxy-config');proxy.add_argument('kind',choices=['nginx','caddy','traefik'])
     logs=sub.add_parser('logs');logs.add_argument('services',nargs='*')
@@ -244,8 +299,9 @@ if __name__=='__main__':
     check=sub.add_parser('verify-backup');check.add_argument('file');check.add_argument('--key');check.add_argument('--image')
     download=sub.add_parser('download-backup');download.add_argument('into')
     export=sub.add_parser('export-images');export.add_argument('file')
+    load=sub.add_parser('import-images');load.add_argument('file',type=Path)
     args=parser.parse_args()
     try:run(args)
-    except (ValueError,RuntimeError,subprocess.CalledProcessError) as exc:
+    except (ValueError,RuntimeError,subprocess.CalledProcessError,KeyError,OSError) as exc:
         print('Setup did not complete: '+(str(exc) if isinstance(exc,(ValueError,RuntimeError)) else 'a deployment command failed; inspect service logs.'),file=sys.stderr)
         raise SystemExit(1)

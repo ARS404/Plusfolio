@@ -18,3 +18,7 @@ frontend/dist
 **/*.key
 **/*.pem
 **/.DS_Store
+**/.terraform
+**/*.tfstate*
+**/*.tfvars
+**/*.tfvars.json

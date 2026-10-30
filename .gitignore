@@ -234,3 +234,9 @@ frontend/dist/
 *.pem
 *.sqlite3*
 *.pfb
+
+# Private infrastructure state and operator settings
+**/.terraform/
+**/*.tfstate*
+**/*.tfvars
+**/*.tfvars.json

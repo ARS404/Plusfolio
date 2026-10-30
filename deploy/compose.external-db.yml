@@ -1,0 +1,22 @@
+# Requires Compose 2.24.4+ for !override. No local database is started.
+services:
+  db:
+    profiles: [local-database]
+  web:
+    secrets: [db_ca]
+  mail:
+    secrets: [db_ca]
+  initialize:
+    secrets: [db_ca]
+    depends_on: !override
+      redis: {condition: service_healthy}
+    networks: [backend, frontend]
+  indexer:
+    secrets: [db_ca]
+    networks: [backend, frontend]
+  backup:
+    secrets: [db_ca]
+    networks: [backend, frontend]
+secrets:
+  db_ca:
+    file: ./.deploy/secrets/db_ca

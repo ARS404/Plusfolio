@@ -39,6 +39,8 @@ def shared_values(values,legacy=False):
     from server_backup import retention_policy
     retention_policy(result)
     for old in ['BIND_ADDRESS','HTTP_PORT','HTTPS_PORT']:result.pop(old,None)
+    from server_storage import validate
+    validate(result)
     return result
 
 
@@ -79,7 +81,7 @@ def check_limits(config):
     return {'memory_mib':memory//1048576,'cpus':round(cpus,2)}
 
 
-def build_images(docker,values,root,targets=None):
+def build_images(docker,values,root,targets=None,*,push=False,metadata=None,platform=None):
     """Private bounded builder; preserve the caller's current/default builder."""
     from release import check, build_metadata
     check(root)
@@ -94,8 +96,18 @@ def build_images(docker,values,root,targets=None):
                '--driver-opt','cpu-period=100000','--driver-opt','cpu-quota='+quota,
                '--driver-opt','cpu-shares=128','--driver-opt','restart-policy=no',stdout=subprocess.DEVNULL)
     env={**os.environ,**{key:str(value) for key,value in values.items()}}
+    targets=targets or ['web','tex','embeddings']
+    options=['--push' if push else '--load']
+    if metadata:options+=['--metadata-file',str(metadata)]
+    if platform:options+=['--set','*.platform='+platform]
+    cache=values.get('BUILD_CACHE_REGISTRY')
+    if cache:
+        for target in targets:
+            ref=cache.rstrip('/')+'/'+target
+            options+=['--set',target+'.cache-from=type=registry,ref='+ref,
+                      '--set',target+'.cache-to=type=registry,ref='+ref+',mode=max,image-manifest=true,oci-mediatypes=true']
     try:
-        docker('buildx','bake','--builder',name,'--file',str(Path(root)/'compose.yml'),'--load','--set','*.args.APP_VERSION='+release['version'],'--set','*.args.VCS_REF='+release['revision'],'--set','*.args.RELEASE_STATUS='+release['status'],*(targets or ['web','tex','embeddings']),env=env)
+        docker('buildx','bake','--builder',name,'--file',str(Path(root)/'compose.yml'),*options,'--set','*.args.APP_VERSION='+release['version'],'--set','*.args.VCS_REF='+release['revision'],'--set','*.args.RELEASE_STATUS='+release['status'],*targets,env=env)
     finally:docker('buildx','stop',name,stdout=subprocess.DEVNULL)
     return name
 

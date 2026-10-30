@@ -8,7 +8,7 @@ from django.conf import settings
 from django.db import connection
 from .release import release_info
 
-EXCLUDE={'.git','.deploy','.local','node_modules','__pycache__','.venv'}
+EXCLUDE={'.git','.deploy','.local','.terraform','node_modules','__pycache__','.venv'}
 CHUNK_SIZE=1024*1024
 
 def source_files():

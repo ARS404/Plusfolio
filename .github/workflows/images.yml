@@ -1,0 +1,51 @@
+name: Publish immutable server images
+on:
+  workflow_dispatch:
+    inputs:
+      registry:
+        description: 'OCI prefix, e.g. registry.yandexcloud.net/REGISTRY_ID/plusfolio'
+        required: true
+      cache_registry:
+        description: 'Optional separate OCI cache prefix (can be on another service)'
+        required: false
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      DOCKER_CONFIG: ${{ runner.temp }}/plusfolio-docker
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate to Yandex Cloud Registry
+        env:
+          YC_REGISTRY_API_KEY: ${{ secrets.YC_REGISTRY_API_KEY }}
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          printf '%s' "$YC_REGISTRY_API_KEY" | docker login --username api_key --password-stdin registry.yandexcloud.net
+      - name: Validate deployment scripts
+        run: |
+          python3 scripts/release.py --check
+          python3 deploy/test_shared_host.py
+      - name: Build and publish Linux AMD64 images
+        env:
+          IMAGE_REGISTRY: ${{ inputs.registry }}
+          CACHE_REGISTRY: ${{ inputs.cache_registry }}
+        run: |
+          python3 scripts/server.py publish-images --registry "$IMAGE_REGISTRY" --cache-registry "$CACHE_REGISTRY" --output "$RUNNER_TEMP/images.json"
+      - name: Test the exact published application image
+        run: |
+          APP_IMAGE=$(python3 -c 'import json,os; print(json.load(open(os.environ["RUNNER_TEMP"]+"/images.json"))["images"]["app"])')
+          docker run --rm --network none --read-only --cpus 2 --memory 2g --memory-swap 2g --pids-limit 256 --tmpfs /tmp:size=512m,mode=1777 -e PLUSFOLIO_DEMO=1 -e PLUSFOLIO_LOCAL_DIR=/tmp/test-runtime -e POSTGRES_HOST= "$APP_IMAGE" python backend/manage.py test core --noinput
+      - name: Test storage and release operations with the production SDK
+        run: |
+          APP_IMAGE=$(python3 -c 'import json,os; print(json.load(open(os.environ["RUNNER_TEMP"]+"/images.json"))["images"]["app"])')
+          docker run --rm --network none --read-only --cpus 1 --memory 512m --memory-swap 512m --pids-limit 128 --tmpfs /tmp:size=64m,mode=1777 "$APP_IMAGE" python deploy/test_cloud_deploy.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plusfolio-images-${{ github.sha }}
+          path: ${{ runner.temp }}/images.json
+      - name: Remove temporary registry credentials
+        if: always()
+        run: rm -f "$DOCKER_CONFIG/config.json"

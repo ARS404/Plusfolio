@@ -17,10 +17,16 @@ x-app: &app
     PLUSFOLIO_PUBLIC_URL: ${PUBLIC_URL:?Run scripts/server.py init}
     DJANGO_ALLOWED_HOSTS: ${PUBLIC_HOST},127.0.0.1,localhost
     DJANGO_SECRET_KEY_FILE: /run/secrets/app_key
-    POSTGRES_HOST: db
-    POSTGRES_DB: plusfolio
-    POSTGRES_USER: plusfolio
+    POSTGRES_HOST: ${POSTGRES_HOST:-db}
+    POSTGRES_DB: ${POSTGRES_DB:-plusfolio}
+    POSTGRES_USER: ${POSTGRES_USER:-plusfolio}
     POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+    PGPORT: ${POSTGRES_PORT:-5432}
+    PGSSLMODE: ${PGSSLMODE:-disable}
+    PGSSLROOTCERT: ${PGSSLROOTCERT:-}
+    PGTARGETSESSIONATTRS: read-write
+    POSTGRES_DISABLE_SERVER_SIDE_CURSORS: ${POSTGRES_DISABLE_SERVER_SIDE_CURSORS:-0}
     REDIS_URL: redis://redis:6379/0
     PLUSFOLIO_EMBEDDING_URL: http://embeddings:8011
     PLUSFOLIO_TEX_SOCKET: /run/plusfolio-tex/compiler.sock
@@ -46,7 +52,7 @@ x-app: &app
 
 services:
   db:
-    image: pgvector/pgvector:0.8.7-pg17-bookworm
+    image: ${PLUSFOLIO_DB_IMAGE:-pgvector/pgvector:0.8.7-pg17-bookworm}
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -72,7 +78,7 @@ services:
       options: {max-size: "10m", max-file: "3"}
     shm_size: 128m
   redis:
-    image: redis:8.8-alpine
+    image: ${PLUSFOLIO_REDIS_IMAGE:-redis:8.8-alpine}
     command: [redis-server,--maxmemory,64mb,--maxmemory-policy,allkeys-lru,--save,"",--appendonly,"no"]
     restart: unless-stopped
     networks: [backend]

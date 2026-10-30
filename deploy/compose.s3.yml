@@ -1,0 +1,14 @@
+services:
+  backup:
+    networks: [backend, frontend]
+    environment:
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-https://storage.yandexcloud.net}
+      BACKUP_S3_REGION: ${BACKUP_S3_REGION:-ru-central1}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:?Set backup bucket}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:?Use a dedicated instance prefix}
+      BACKUP_S3_STORAGE_CLASS: ${BACKUP_S3_STORAGE_CLASS:-STANDARD}
+      BACKUP_S3_CREDENTIALS_FILE: /run/secrets/backup_s3_credentials
+    secrets: [backup_s3_credentials]
+secrets:
+  backup_s3_credentials:
+    file: ./.deploy/secrets/backup_s3_credentials
