@@ -2,6 +2,7 @@ from datetime import timedelta
 from unittest import skipUnless
 from django.db import connection
 from django.test import TestCase,Client,override_settings
+from django.test.utils import CaptureQueriesContext
 from django.core.management import call_command
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -907,10 +908,13 @@ class DomainTests(TestCase):
         self.assertEqual(WorksheetIssue.objects.count(),before);self.assertEqual(Invitation.objects.count(),invites)
 
     def test_batch_invitation_creates_separate_scoped_letters_without_duplicates(self):
-        response=self.client_for(self.admin).post('/api/invitations',{'circle_ids':[str(self.circle.pk),str(self.other.pk),str(self.circle.pk)],'role':'student','email':'batch@plusfolio.example'},format='json')
+        with CaptureQueriesContext(connection) as queries:
+            response=self.client_for(self.admin).post('/api/invitations',{'circle_ids':[str(self.circle.pk),str(self.other.pk),str(self.circle.pk)],'role':'student','email':'batch@plusfolio.example'},format='json')
+        self.assertEqual(sum('FROM "core_circle"' in query['sql'] for query in queries),1)
         self.assertEqual(response.status_code,201);self.assertEqual(len(response.data['ids']),2)
         objects=Invitation.objects.filter(pk__in=response.data['ids'])
-        self.assertEqual(set(objects.values_list('circle_id',flat=True)),{self.circle.pk,self.other.pk})
+        circles={str(obj.pk):obj.circle_id for obj in objects}
+        self.assertEqual([circles[pk] for pk in response.data['ids']],[self.circle.pk,self.other.pk])
         self.assertEqual(EmailOutbox.objects.filter(invitation__in=objects).count(),2)
         self.assertTrue(all(row.role=='student' for row in objects))
 
@@ -923,6 +927,7 @@ class DomainTests(TestCase):
         previous.refresh_from_db();self.assertEqual(previous.state,'pending')
         self.assertEqual((Invitation.objects.count(),EmailOutbox.objects.count(),AuditEvent.objects.count()),counts)
         self.assertEqual(self.client_for(self.teacher).post('/api/invitations',{'circle_ids':[str(self.circle.pk),str(self.foreign.pk)],'role':'student','email':'batch@plusfolio.example'},format='json').status_code,404)
+        self.assertEqual((Invitation.objects.count(),EmailOutbox.objects.count(),AuditEvent.objects.count()),counts)
 
 
     def test_account_returns_own_identity_and_only_assigned_role_sections(self):

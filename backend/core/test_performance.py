@@ -69,10 +69,15 @@ class QueryBudgetTests(TestCase):
             self.assertEqual(len(self.request(user,f'/api/circles/{self.circles[0].pk}/issues/{issue.pk}',budget)['problems']),80)
 
     def test_repeated_journal_tasks_keep_query_budget_and_closed_solutions(self):
+        problem=Problem.objects.filter(items__worksheet__issues__circle=self.circles[0]).first()
+        Solve.objects.create(student=self.student.student,problem=problem,solved=False,version=7,changed_by=self.teacher,source_circle=self.circles[0])
+        Discussion.objects.create(circle=self.circles[0],problem=problem,discussed=False,version=5,changed_by=self.teacher)
         result=self.request(self.student,f'/api/circles/{self.circles[0].pk}/journal',12)
         self.assertEqual(len(result['blocks']),40)
         self.assertTrue(all(len(block['problems'])==80 for block in result['blocks']))
         self.assertTrue(all('solution' not in problem for block in result['blocks'] for problem in block['problems']))
+        self.assertEqual(result['solves'],[{'student_id':self.student.student.pk,'problem_id':str(problem.pk),'solved':False,'version':7}])
+        self.assertEqual(result['discussions'],[{'problem_id':str(problem.pk),'discussed':False,'solution_visible':False,'version':5}])
 
     def test_export_snapshot_matches_screen_data_without_loading_task_bodies(self):
         from .journal import select_issues, snapshot

@@ -348,8 +348,8 @@ def extend_documentation(sections, user, *, demo=False, audience='human', read_o
     from .people import has_adult_role
     api_access=has_adult_role(user)
     if not api_access:audience='human'
-    sections = deepcopy(sections) + (automation_sections() + workflow_sections(user,read_only=read_only) if api_access else [])
-    operations = {item['id']:item for item in operations_for(user, demo=demo, read_only=read_only)}
+    sections = sections + (automation_sections() + workflow_sections(user,read_only=read_only) if api_access else [])
+    operations = {item['id']:item for item in operations_for(user, demo=demo, read_only=read_only)} if audience=='robot' else {}
     for section in sections:
         detail = DETAILS.get(section['id'])
         if detail:

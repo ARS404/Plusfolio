@@ -132,8 +132,8 @@ function Journal({circle}:any){
  const journal=resource.data;
  const visiblePeople=(journal?.people||[]).filter((person:any)=>matchesEntity(person,search,person.name));
  const blocks=journal?.blocks||[];
- const states=new Map<string,any>((journal?.solves||[]).map((state:any)=>[state.student_id+':'+state.problem_id,state]));
- const discussions=new Map<string,any>((journal?.discussions||[]).map((state:any)=>[state.problem_id,state]));
+ const states=useMemo(()=>new Map<string,any>((journal?.solves||[]).map((state:any)=>[state.student_id+':'+state.problem_id,state])),[journal]);
+ const discussions=useMemo(()=>new Map<string,any>((journal?.discussions||[]).map((state:any)=>[state.problem_id,state])),[journal]);
  const problemCount=new Set<string>(blocks.flatMap((block:any)=>block.problems.map((problem:any)=>problem.id))).size;
  const columns=blocks.reduce((count:number,block:any)=>count+block.problems.length+(journal?.show_group_stats?1:0),0);
  const openProblem=async(problem:any)=>{

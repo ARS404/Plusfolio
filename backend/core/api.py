@@ -403,7 +403,9 @@ def invitations(request):
         d=request.data;role=d.get('role')
         if role in ['student','teacher']:
             ids=s.selection_ids(d,'circle_ids','circle_id')
-            selected=[s.get_circle(request.user,pk) for pk in ids]
+            found={str(circle.pk):circle for circle in s.circles_for(request.user).filter(pk__in=ids)}
+            if len(found)!=len(ids):raise s.NotFound('Кружок недоступен.')
+            selected=[found[pk] for pk in ids]
         else:
             if d.get('circle_ids') or d.get('circle_id'):raise DjangoValidationError('Для этой роли область определяется без выбора кружков.')
             selected=[None]

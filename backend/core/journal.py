@@ -48,12 +48,12 @@ def snapshot(user, circle, selected, serialize_problem, search=''):
             'worksheet': {'id': str(issue.worksheet_id), 'public_id':f'W-{issue.worksheet.document.number_id}', 'title': issue.worksheet.title, 'description': issue.worksheet.description,**issue_references(issue)},
             'problems': [serialized[problem.pk] for problem in problems],
         })
-    states = Solve.objects.filter(student_id__in=[person.student_id for person in people], problem_id__in=problem_ids)
-    discussions = Discussion.objects.filter(circle=circle, problem_id__in=problem_ids)
+    states = Solve.objects.filter(student_id__in=[person.student_id for person in people], problem_id__in=problem_ids).values_list('student_id', 'problem_id', 'solved', 'version')
+    discussions = Discussion.objects.filter(circle=circle, problem_id__in=problem_ids).values_list('problem_id', 'discussed', 'solution_visible', 'version')
     return {
         'circle': {'id': str(circle.pk), 'public_id':f'C-{circle.number_id}', 'name': circle.name}, 'blocks': blocks,
         'people': [{'id': person.student_id, 'public_id':f'S-{person.student_id}', 'user_public_id':f'U-{person.student.user_id}', 'name': person.student.user.name, **person.student.education_info(), 'self': person.student.user_id == user.pk} for person in people],
-        'solves': [{'student_id': state.student_id, 'problem_id': str(state.problem_id), 'solved': state.solved, 'version': state.version} for state in states],
-        'discussions': [{'problem_id': str(state.problem_id), 'discussed': state.discussed, 'solution_visible': state.solution_visible, 'version': state.version} for state in discussions],
+        'solves': [{'student_id': student_id, 'problem_id': str(problem_id), 'solved': solved, 'version': version} for student_id, problem_id, solved, version in states],
+        'discussions': [{'problem_id': str(problem_id), 'discussed': discussed, 'solution_visible': solution_visible, 'version': version} for problem_id, discussed, solution_visible, version in discussions],
         'can_write': s.can_write(user, circle), 'show_group_stats': s.can_analyse_group(user, circle),
     }
