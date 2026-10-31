@@ -1,0 +1,30 @@
+# Disposable HTTPS S3 emulator. Real SMTP is replaced by compose.test.yml.
+services:
+  object-store:
+    image: motoserver/moto:5.1.17
+    entrypoint: [moto_server]
+    command: [-H, 0.0.0.0, -p, '5000', -c, /certs/server.crt, -k, /certs/server.key]
+    environment:
+      MOTO_S3_DEFAULT_KEY_BUFFER_SIZE: '524288'
+    networks:
+      frontend:
+        aliases: [object-store]
+    volumes: ["./.deploy/capacity/certs:/certs:ro", "capacity-s3:/tmp"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 0.25
+    # Moto assembles a complete multipart object in RAM. This is fixture memory,
+    # not part of the production app; keep per-key buffers on its scratch disk.
+    mem_limit: 1g
+    memswap_limit: 1g
+    pids_limit: 64
+  backup:
+    environment:
+      AWS_CA_BUNDLE: /run/secrets/capacity_ca
+    secrets: [capacity_ca]
+secrets:
+  capacity_ca:
+    file: ./.deploy/capacity/certs/server.crt
+volumes:
+  capacity-s3: {}

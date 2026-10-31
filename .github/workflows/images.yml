@@ -28,6 +28,7 @@ jobs:
         run: |
           python3 scripts/release.py --check
           python3 deploy/test_shared_host.py
+          python3 deploy/test_capacity.py
       - name: Build and publish Linux AMD64 images
         env:
           IMAGE_REGISTRY: ${{ inputs.registry }}

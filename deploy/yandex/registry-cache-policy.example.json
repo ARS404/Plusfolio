@@ -1,0 +1,16 @@
+[
+  {
+    "path_prefix": "/build-cache/",
+    "docker_filters": {"tag_status": "TAG_STATUS_ANY"},
+    "keep_by_version": {"keep_versions_count": 1}
+  },
+  {
+    "path_prefix": "/build-cache/",
+    "docker_filters": {"tag_status": "UNTAGGED"},
+    "delete": {
+      "type": "SOFT_DELETE",
+      "older_than_days": 7,
+      "cooldown_period_days": 1
+    }
+  }
+]

@@ -1,0 +1,31 @@
+# Opt-in for a dedicated 2-vCPU / 4-GiB VM. Limits are ceilings, not reservations.
+# Foreground services can borrow idle CPU; background work has lower priority.
+# Memory limits remain in compose.yml; leave room for the OS, Docker and Caddy.
+services:
+  web:
+    cpus: ${WEB_CPUS:-1.25}
+    cpu_shares: 1024
+  db:
+    cpus: ${DB_CPUS:-1.0}
+    cpu_shares: 768
+  redis:
+    cpus: ${REDIS_CPUS:-0.10}
+    cpu_shares: 512
+  embeddings:
+    cpus: ${EMBEDDINGS_CPUS:-0.75}
+    cpu_shares: 384
+  tex:
+    cpus: ${TEX_CPUS:-0.75}
+    cpu_shares: 256
+  initialize:
+    cpus: ${INITIALIZE_CPUS:-1.0}
+    cpu_shares: 512
+  indexer:
+    cpus: ${INDEXER_CPUS:-0.25}
+    cpu_shares: 128
+  mail:
+    cpus: ${MAIL_CPUS:-0.10}
+    cpu_shares: 128
+  backup:
+    cpus: ${BACKUP_CPUS:-0.15}
+    cpu_shares: 64

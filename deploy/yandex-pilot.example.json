@@ -1,5 +1,6 @@
 {
   "public_url": "https://plusfolio.example.ru",
+  "resource_profile": "dedicated-pilot",
   "admin_email": "admin@example.ru",
   "smtp_host": "postbox.cloud.yandex.net",
   "smtp_port": "465",

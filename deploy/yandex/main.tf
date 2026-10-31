@@ -130,7 +130,15 @@ resource "yandex_storage_bucket" "backups" {
     enabled                                = true
     abort_incomplete_multipart_upload_days = 1
     expiration { days = var.retention_days }
-    noncurrent_version_expiration { days = var.retention_days }
+    # Expiration first creates a delete marker; reclaim the noncurrent payload
+    # on the following lifecycle pass, rather than keeping another 14 days.
+    noncurrent_version_expiration { days = 1 }
+  }
+  lifecycle_rule {
+    id      = "pilot-expired-delete-markers"
+    prefix  = "plusfolio/pilot/"
+    enabled = true
+    expiration { expired_object_delete_marker = true }
   }
   lifecycle { prevent_destroy = true }
 }

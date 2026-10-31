@@ -1,5 +1,5 @@
 """Storage, immutable releases and off-server recovery; only synthetic data."""
-import argparse,hashlib,io,json,os,subprocess,sys,tempfile,unittest
+import argparse,hashlib,io,json,os,subprocess,sys,tempfile,time,unittest
 from pathlib import Path
 from unittest.mock import Mock,patch
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'scripts'))
@@ -9,6 +9,14 @@ RELEASE={'version':'1.0.0','status':'development','revision':'a'*40}
 
 
 class StorageTests(unittest.TestCase):
+    def test_dedicated_cpu_profile_is_explicit_and_does_not_change_shared_default(self):
+        self.assertEqual([p.name for p in server_storage.compose_files({},ROOT)],['compose.yml'])
+        values,_=server_storage.configuration({'resource_profile':'dedicated-pilot'})
+        self.assertEqual(values,{'RESOURCE_PROFILE':'dedicated-pilot'})
+        self.assertEqual([p.name for p in server_storage.compose_files(values,ROOT)],
+                         ['compose.yml','compose.dedicated-pilot.yml'])
+        with self.assertRaises(ValueError):server_storage.validate({'RESOURCE_PROFILE':'unknown'})
+
     def test_missing_or_wrong_mount_never_creates_a_database_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);target=root/'data';target.mkdir()
@@ -109,21 +117,54 @@ class ImageTests(unittest.TestCase):
 class S3Tests(unittest.TestCase):
     values={'BACKUP_S3_BUCKET':'own','BACKUP_S3_PREFIX':'instance/','BACKUP_S3_STORAGE_CLASS':'COLD'}
     def test_upload_sends_only_encrypted_file_and_checks_remote_size_and_checksum(self):
+        from botocore.exceptions import ClientError
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'plusfolio-test.tar.gz.age';path.write_bytes(b'synthetic-encrypted-bytes')
             checksum=hashlib.sha256(path.read_bytes()).hexdigest()
-            s3=Mock();s3.head_object.return_value={'ContentLength':path.stat().st_size,'Metadata':{'sha256':checksum}}
+            head={'ContentLength':path.stat().st_size,'Metadata':{'sha256':checksum}}
+            missing=ClientError({'ResponseMetadata':{'HTTPStatusCode':404},'Error':{'Code':'NoSuchKey'}},'HeadObject')
+            s3=Mock();s3.head_object.side_effect=[missing,head]
             with patch('server_s3.client',return_value=s3):
                 self.assertEqual(server_s3.upload(path,self.values),'s3://own/instance/'+path.name)
                 self.assertEqual(s3.upload_file.call_args.kwargs['ExtraArgs'],{'StorageClass':'COLD','Metadata':{'sha256':checksum}})
-                s3.head_object.return_value['ContentLength']+=1
+                s3.upload_file.reset_mock();s3.head_object.side_effect=None;s3.head_object.return_value=head
+                server_s3.upload(path,self.values)
+                s3.upload_file.assert_not_called()
+                s3.head_object.return_value={**head,'ContentLength':path.stat().st_size+1}
                 with self.assertRaises(RuntimeError):server_s3.upload(path,self.values)
-    def test_failed_offsite_upload_does_not_prune_or_mark_success(self):
+    def test_failed_offsite_upload_keeps_two_local_snapshots_and_never_marks_success(self):
         with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory);archive=root/'synthetic.tar.gz.age';archive.write_bytes(b'encrypted')
-            with patch('server_backup.Path',side_effect=lambda name:root if name=='/backups' else Path(name)),patch('server_backup._backup',return_value=archive),patch('server_s3.upload',side_effect=RuntimeError('upload failed')),patch('server_backup.prune_backups') as prune:
+            root=Path(directory)
+            archives=[root/f'plusfolio-20261031T00000000000{n}Z.tar.gz.age' for n in range(1,4)]
+            for archive in archives:archive.write_bytes(b'encrypted')
+            archive=archives[-1]
+            with patch.dict(os.environ,{'BACKUP_MAX_COUNT':'2'}),patch('server_backup.Path',side_effect=lambda name:root if name=='/backups' else Path(name)),patch('server_backup._backup',return_value=archive),patch('server_s3.upload',side_effect=RuntimeError('upload failed')):
                 with self.assertRaises(RuntimeError):server_backup.backup()
-            prune.assert_not_called();self.assertFalse((root/'last-success').exists());self.assertEqual(archive.read_bytes(),b'encrypted')
+            self.assertFalse((root/'last-success').exists());self.assertEqual(archive.read_bytes(),b'encrypted')
+            self.assertEqual(sorted(root.glob('*.age')),archives[-2:])
+            self.assertEqual((root/'.upload-pending').read_text(),archive.name)
+    def test_worker_retries_the_same_archive_but_manual_update_always_gets_a_fresh_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);old=root/'plusfolio-20261031T000000000001Z.tar.gz.age';old.write_bytes(b'first')
+            new=root/'plusfolio-20261031T000000000002Z.tar.gz.age';new.write_bytes(b'second')
+            os.utime(old,(time.time()-3600,)*2)
+            (root/'.upload-pending').write_text(old.name)
+            with patch.dict(os.environ,{'BACKUP_S3_BUCKET':'synthetic'}),patch('server_backup.Path',side_effect=lambda name:root if name=='/backups' else Path(name)),patch('server_backup._backup',return_value=new) as create,patch('server_s3.upload',return_value=None) as upload:
+                self.assertEqual(server_backup.backup(retry_pending=True),old);create.assert_not_called()
+                self.assertFalse((root/'.upload-pending').exists())
+                self.assertEqual(float((root/'last-success').read_text()),old.stat().st_mtime)
+                (root/'.upload-pending').write_text(old.name)
+                self.assertEqual(server_backup.backup(),new);create.assert_called_once()
+                self.assertEqual([call.args[0] for call in upload.call_args_list],[old,new])
+    def test_stale_pending_upload_never_stops_daily_local_snapshots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);old=root/'plusfolio-20261030T000000000001Z.tar.gz.age';old.write_bytes(b'old')
+            os.utime(old,(time.time()-90000,)*2)
+            new=root/'plusfolio-20261031T000000000001Z.tar.gz.age';new.write_bytes(b'fresh')
+            (root/'.upload-pending').write_text(old.name)
+            with patch.dict(os.environ,{'BACKUP_S3_BUCKET':'synthetic','BACKUP_INTERVAL':'86400'}),patch('server_backup.Path',side_effect=lambda name:root if name=='/backups' else Path(name)),patch('server_backup._backup',return_value=new) as create,patch('server_s3.upload',return_value=None):
+                self.assertEqual(server_backup.backup(retry_pending=True),new);create.assert_called_once()
+            self.assertEqual(float((root/'last-success').read_text()),new.stat().st_mtime)
     def test_download_checks_real_bytes_removes_failed_partial_and_never_overwrites(self):
         body=b'encrypted synthetic archive';checksum=hashlib.sha256(body).hexdigest()
         with tempfile.TemporaryDirectory() as directory:

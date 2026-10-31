@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'scripts'))
+ARCHIVE_NAME=r'plusfolio-\d{8}T\d{12}Z\.tar\.gz\.age'
 
 
 class HashedReader:
@@ -29,7 +30,7 @@ def prune_backups(directory,policy=None,now=None):
     policy=policy or retention_policy();now=time.time() if now is None else now
     files=[]
     for path in Path(directory).iterdir():
-        if not re.fullmatch(r'plusfolio-\d{8}T\d{12}Z\.tar\.gz\.age',path.name):continue
+        if not re.fullmatch(ARCHIVE_NAME,path.name):continue
         info=path.lstat()
         if stat.S_ISREG(info.st_mode):files.append((path,info))
     files.sort(key=lambda row:row[0].name,reverse=True)
@@ -45,7 +46,7 @@ def prune_backups(directory,policy=None,now=None):
     return {'removed':removed,'kept':len(keep),'bytes':used}
 
 
-def backup():
+def backup(*,retry_pending=False):
     directory=Path('/backups');directory.mkdir(exist_ok=True)
     policy=retention_policy()
     with (directory/'.backup.lock').open('a') as lock:
@@ -54,12 +55,25 @@ def backup():
             print('Backup already running; nothing changed.',flush=True);return None
         try:os.nice(10)
         except OSError:pass
-        result=_backup()
+        pending=directory/'.upload-pending';result=None
+        if retry_pending and os.environ.get('BACKUP_S3_BUCKET') and pending.exists():
+            name=pending.read_text().strip()
+            if not re.fullmatch(ARCHIVE_NAME,name):raise RuntimeError('Invalid pending backup name')
+            candidate=directory/name
+            if candidate.is_file() and not candidate.is_symlink() and time.time()-candidate.stat().st_mtime<int(os.environ.get('BACKUP_INTERVAL','86400')):
+                result=candidate
+        if result is None:result=_backup()
+        temporary=directory/'.upload-pending.tmp'
+        temporary.write_text(result.name);temporary.replace(pending)
+        # A completed encrypted snapshot remains useful locally when S3 is down.
+        # Keep retention bounded independently of the transport, including the
+        # existing minimum of two complete archives.
+        report=prune_backups(directory,policy)
         from server_s3 import upload
         remote=upload(result)
         if remote:print('Remote encrypted backup verified: '+remote,flush=True)
-        report=prune_backups(directory,policy)
-        (directory/'last-success').write_text(str(time.time()))
+        pending.unlink(missing_ok=True)
+        (directory/'last-success').write_text(str(result.stat().st_mtime))
         print('Backup retention: '+json.dumps(report),flush=True)
         return result
 
@@ -166,11 +180,12 @@ if __name__=='__main__':
     else:
         if args.watch:Path('/backups/last-success').unlink(missing_ok=True)
         while True:
-            try:backup()
+            try:result=backup(retry_pending=args.watch)
             except Exception as exc:
                 # Do not leak pg_dump connection settings or SMTP/deployment configuration.
                 print('Backup failed: '+type(exc).__name__,flush=True)
                 if not args.watch:raise SystemExit(1)
                 time.sleep(60);continue
             if not args.watch:break
-            time.sleep(int(os.environ.get('BACKUP_INTERVAL','86400')))
+            # Retrying an older snapshot must not postpone the next daily dump.
+            time.sleep(max(0,result.stat().st_mtime+int(os.environ.get('BACKUP_INTERVAL','86400'))-time.time()) if result else 2)

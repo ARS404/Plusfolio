@@ -21,12 +21,22 @@ def client(values=None):
 
 def upload(path, values=None):
     from boto3.s3.transfer import TransferConfig
+    from botocore.exceptions import ClientError
     values = os.environ if values is None else values
     if not values.get('BACKUP_S3_BUCKET'):return None
     path = Path(path)
     with path.open('rb') as stream:checksum = hashlib.file_digest(stream, 'sha256').hexdigest()
     bucket = values['BACKUP_S3_BUCKET'];key = values['BACKUP_S3_PREFIX'].rstrip('/') + '/' + path.name
     s3 = client(values)
+    # A previous PUT may have completed before its response was lost. Reuse the
+    # immutable object instead of creating another full version on every retry.
+    try:existing=s3.head_object(Bucket=bucket,Key=key)
+    except ClientError as error:
+        if error.response.get('ResponseMetadata',{}).get('HTTPStatusCode')!=404:raise
+    else:
+        if existing['ContentLength']!=path.stat().st_size or existing.get('Metadata',{}).get('sha256')!=checksum:
+            raise RuntimeError('S3 backup name already exists with different content')
+        return 's3://' + bucket + '/' + key
     # One transfer thread and bounded parts fit the existing backup memory limit.
     s3.upload_file(str(path), bucket, key,
         ExtraArgs={'StorageClass':values.get('BACKUP_S3_STORAGE_CLASS','STANDARD'),'Metadata':{'sha256':checksum}},

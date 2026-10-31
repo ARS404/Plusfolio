@@ -8,6 +8,8 @@ PATHS = [('DB_DATA_DIR', 'DB_MOUNTPOINT', 'database'), ('BACKUP_DIR', 'BACKUP_MO
 
 
 def validate(values):
+    if values.get('RESOURCE_PROFILE', 'shared') not in {'shared', 'dedicated-pilot'}:
+        raise ValueError('RESOURCE_PROFILE: shared или dedicated-pilot')
     if values.get('BUILD_CACHE_REGISTRY') and not re.fullmatch(r'[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+',values['BUILD_CACHE_REGISTRY']):
         raise ValueError('Некорректный BUILD_CACHE_REGISTRY')
     for directory, mount, _ in PATHS:
@@ -36,6 +38,8 @@ def validate(values):
 
 def compose_files(values, root):
     files = [Path(root) / 'compose.yml']
+    if values.get('RESOURCE_PROFILE') == 'dedicated-pilot':
+        files.append(Path(root) / 'deploy/compose.dedicated-pilot.yml')
     for key, name in [('DB_DATA_DIR', 'database-disk'), ('BACKUP_DIR', 'backup-disk'), ('BACKUP_S3_BUCKET', 's3')]:
         if values.get(key):files.append(Path(root) / 'deploy' / ('compose.' + name + '.yml'))
     if values.get('POSTGRES_HOST', 'db') != 'db':files.append(Path(root) / 'deploy/compose.external-db.yml')
@@ -68,7 +72,7 @@ def check_paths(values, docker, config):
 def configuration(data):
     """Public settings plus source files to copy into the private secret directory."""
     values = {};files = {}
-    for key in [item for directory, mount, _ in PATHS for item in [directory, mount]] + ['BUILD_CACHE_REGISTRY']:
+    for key in [item for directory, mount, _ in PATHS for item in [directory, mount]] + ['BUILD_CACHE_REGISTRY', 'RESOURCE_PROFILE']:
         if key.lower() in data:values[key] = str(data[key.lower()])
     database = data.get('database')
     if database:

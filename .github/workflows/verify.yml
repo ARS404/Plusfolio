@@ -19,7 +19,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: python3 scripts/release.py --check-tag "$GITHUB_REF_NAME"
       - name: Verify shared-host safeguards and backup retention
-        run: python3 deploy/test_shared_host.py
+        run: |
+          python3 deploy/test_shared_host.py
+          python3 deploy/test_capacity.py
       - name: Build a clean Linux server and exercise HTTPS, SMTP, CPU search, TeX and backups
         run: python3 deploy/check_server.py --keep
       - name: Verify download integrity and immutable dependency locks
