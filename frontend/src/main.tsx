@@ -36,12 +36,15 @@ async function api(path:string,method='GET',data?:any,signal?:AbortSignal){
  if(!res.ok)throw new Error(typeof body.detail==='string'?body.detail:JSON.stringify(body.detail||body));
  return body;
 }
-function useResource(path:string|null){
+function useResource(path:string|null,{keepDataOnReload=false}:{keepDataOnReload?:boolean}={}){
  const {revision,user}=useApp();const [v,setV]=useState(0);
- const key=JSON.stringify([path,revision,user?.id,v]);
- const [result,setResult]=useState<{key:string;data:any;error:string}>({key:'',data:null,error:''});
- useEffect(()=>{const controller=new AbortController();if(path)api(path,'GET',undefined,controller.signal).then(data=>{if(!controller.signal.aborted)setResult({key,data,error:''})}).catch(error=>{if(!controller.signal.aborted)setResult({key,data:null,error:error.message})});return()=>controller.abort()},[key]);
- return {data:result.key===key?result.data:null,error:result.key===key?result.error:'',reload:()=>setV(x=>x+1)};
+ const scope=JSON.stringify([path,revision,user?.id]);
+ const key=JSON.stringify([scope,v]);
+ const [result,setResult]=useState<{key:string;scope:string;data:any;error:string}>({key:'',scope:'',data:null,error:''});
+ useEffect(()=>{const controller=new AbortController();if(path)api(path,'GET',undefined,controller.signal).then(data=>{if(!controller.signal.aborted)setResult({key,scope,data,error:''})}).catch(error=>{if(!controller.signal.aborted)setResult(previous=>({key,scope,data:keepDataOnReload&&previous.scope===scope?previous.data:null,error:error.message}))});return()=>controller.abort()},[key,keepDataOnReload]);
+ // Keep the journal mounted during a reload, but never reuse another query or account's data.
+ const retained=keepDataOnReload&&result.scope===scope;
+ return {data:result.key===key||retained?result.data:null,error:result.key===key?result.error:'',refreshing:retained&&result.key!==key,reload:()=>setV(x=>x+1)};
 }
 function useDebounced<T>(value:T,delay=250){const [debounced,setDebounced]=useState(value);useEffect(()=>{const timer=setTimeout(()=>setDebounced(value),delay);return()=>clearTimeout(timer)},[value,delay]);return debounced}
 
@@ -125,10 +128,11 @@ function Journal({circle}:any){
  const {setModal,toast,user}=useApp();
  const [chosen,setChosen]=useState<number[]|null>(null),[search,setSearch]=useState('');
  const mode=chosen===null?'all':'multiple';
- const [busy,setBusy]=useState(false),[downloading,setDownloading]=useState(false),[fileFormat,setFileFormat]=useState('xlsx');
+ const [saving,setSaving]=useState(false),[downloading,setDownloading]=useState(false),[fileFormat,setFileFormat]=useState('xlsx');
  const selectedIds=(issues||[]).filter((item:any)=>chosen===null||chosen.includes(item.id)).map((item:any)=>item.id);
  const issueQuery=selectedIds.join(',');
- const resource=useResource(issues&&selectedIds.length?'/circles/'+circle.id+'/journal?'+new URLSearchParams({issues:issueQuery}):null);
+ const resource=useResource(issues&&selectedIds.length?'/circles/'+circle.id+'/journal?'+new URLSearchParams({issues:issueQuery}):null,{keepDataOnReload:true});
+ const busy=saving||resource.refreshing;
  const journal=resource.data;
  const visiblePeople=(journal?.people||[]).filter((person:any)=>matchesEntity(person,search,person.name));
  const blocks=journal?.blocks||[];
@@ -141,7 +145,7 @@ function Journal({circle}:any){
  };
  const change=async(problem:any,student:any,kind:'solve'|'discussion'|'solution-visibility'='solve')=>{
   if(busy)return;
-  setBusy(true);
+  setSaving(true);
   const discussion=kind!=='solve';
   const state=discussion?discussions.get(problem.id):states.get(student.id+':'+problem.id);
   const value=kind==='solution-visibility'?state?.solution_visible:discussion?state?.discussed:state?.solved;
@@ -150,7 +154,7 @@ function Journal({circle}:any){
     value:!value,version:state?.version||0,...(discussion?{}:{student_id:student.id})
    });
    resource.reload();
-  }catch(e:any){toast(e.message);resource.reload()}finally{setBusy(false)}
+  }catch(e:any){toast(e.message);resource.reload()}finally{setSaving(false)}
  };
  const download=async()=>{
   setDownloading(true);
@@ -199,7 +203,7 @@ function Journal({circle}:any){
     <tbody>
      <tr className="discussion-row"><td><CheckCheck size={16}/>Разобрана в кружке</td>{blocks.map((block:any)=><React.Fragment key={block.issue_id}>{block.problems.map((problem:any,position:number)=>{const state=discussions.get(problem.id);return <td key={problem.id} className={position===0?'block-start':''}><button aria-label={'Разбор: '+problem.title+' · '+block.worksheet.title} className={'discussion-mark '+(state?.discussed?'yes':'')} disabled={!journal.can_write||busy} onClick={()=>change(problem,null,'discussion')}>{state?.discussed?<Check size={16}/>:'—'}</button></td>})}{journal.show_group_stats&&<td/>}</React.Fragment>)}</tr>
      {journal.can_write&&<tr className="solution-visibility-row"><td><Eye size={16}/>Показать решение</td>{blocks.map((block:any)=><React.Fragment key={block.issue_id}>{block.problems.map((problem:any,position:number)=>{const state=discussions.get(problem.id);return <td key={problem.id} className={position===0?'block-start':''}><input type="checkbox" className="solution-visibility-checkbox" checked={!!state?.solution_visible} disabled={!state?.discussed||busy} title={state?.discussed?'Показать школьникам решение в этом кружке':'Сначала отметьте разбор задачи'} aria-label={'Показать решение: '+problem.title+' · '+block.worksheet.title} onChange={()=>change(problem,null,'solution-visibility')}/></td>})}{journal.show_group_stats&&<td/>}</React.Fragment>)}</tr>}
-     {visiblePeople.map((person:any)=><tr key={person.id}><td><div className="student-name"><Avatar name={person.name} small/><span>{person.name}<small>{person.public_id} · {person.grade_label}{person.self?' · Это вы':''}</small></span></div></td>{blocks.map((block:any)=>{let solved=0;return <React.Fragment key={block.issue_id}>{block.problems.map((problem:any,position:number)=>{const state=states.get(person.id+':'+problem.id);if(state?.solved)solved++;return <td key={problem.id} className={position===0?'block-start':''}><button aria-label={`${person.name}, ${problem.title}: ${state?.solved?'решена':'не решена'} · ${block.worksheet.title}`} className={'solve-mark '+(state?.solved?'yes':'')} disabled={!journal.can_write||busy} onClick={()=>change(problem,person)}>{state?.solved?<Plus size={19} strokeWidth={2.4}/>:'·'}</button></td>})}{journal.show_group_stats&&<td className="score-col"><span className="score-value">{solved}<small> / {block.problems.length}</small></span></td>}</React.Fragment>})}</tr>)}
+     {visiblePeople.map((person:any)=><tr key={person.id} className={person.self?'current-user-row':undefined}><td><div className="student-name"><Avatar name={person.name} small/><span className="student-name-text"><span className="student-name-line"><span>{person.name}</span>{person.self&&<span className="current-user-badge">Вы</span>}</span><small>{person.public_id} · {person.grade_label}</small></span></div></td>{blocks.map((block:any)=>{let solved=0;return <React.Fragment key={block.issue_id}>{block.problems.map((problem:any,position:number)=>{const state=states.get(person.id+':'+problem.id);if(state?.solved)solved++;return <td key={problem.id} className={position===0?'block-start':''}><button aria-label={`${person.name}, ${problem.title}: ${state?.solved?'решена':'не решена'} · ${block.worksheet.title}`} className={'solve-mark '+(state?.solved?'yes':'')} disabled={!journal.can_write||busy} onClick={()=>change(problem,person)}>{state?.solved?<Plus size={19} strokeWidth={2.4}/>:'·'}</button></td>})}{journal.show_group_stats&&<td className="score-col"><span className="score-value">{solved}<small> / {block.problems.length}</small></span></td>}</React.Fragment>})}</tr>)}
     </tbody>
    </table></div>
    {!visiblePeople.length&&<Empty icon={Users} title={search?'Никого не найдено':'Кружок пока пуст'} description={search?'Измените имя в поиске.':'Добавьте зарегистрированных школьников или отправьте приглашения.'}/>}

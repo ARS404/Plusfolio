@@ -67,3 +67,14 @@
 
 .entity-id{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;line-height:1.6;font-weight:550;letter-spacing:.1px;color:#587666;background:#f0f5ef;border:1px solid #dfe8dd;border-radius:5px;padding:2px 7px;vertical-align:middle}
 .entity-id.copyable{position:relative;cursor:pointer}.entity-id.copyable:hover{background:#e6efe5;border-color:#aac3a7}.entity-id-feedback:empty{display:none}.entity-id-feedback{position:absolute;bottom:calc(100% + 6px);left:0;background:#285d4b;color:#fff;border-radius:5px;padding:5px 8px;font:11px Inter,sans-serif;z-index:5}.entity-id-list{display:flex;flex-wrap:wrap;gap:7px;margin:9px 0 12px}.material-index{min-width:72px;max-width:110px;overflow-wrap:anywhere}.topic-row>.entity-id{margin-left:6px;flex-shrink:0}.problem-pick-list .entity-id,.topic-options .entity-id{margin-right:7px;flex-shrink:0}.topic-filter-row label .entity-id{margin-left:6px;font-size:10px}.topic-filter-row label{min-width:0}.circle-card>.entity-id{margin:3px 0 8px}.page-heading h1+.entity-id{margin:10px 0 2px}.detail-modal>.entity-id,.pdf-modal>.entity-id{margin:10px 0}.worksheet-heading-row .entity-id{margin-top:5px}.person-row small .entity-id{margin-right:3px}.tag-directory-row{flex-wrap:wrap}.account-identity-text .entity-id-list{margin:10px 0}.student-picker .selected-student small,.student-search-results small{line-height:1.8}
+
+/* Highlight the signed-in student across the journal, including the sticky name column. */
+.student-name-text{min-width:0}
+.student-name-line{display:flex;align-items:center;flex-wrap:wrap;gap:5px 7px}
+.current-user-badge{display:inline-flex;flex-shrink:0;align-items:center;padding:3px 7px;border:1px solid #bdd5c4;border-radius:999px;background:#d8eadb;color:var(--green);font-size:9px;font-weight:600;line-height:1.2;white-space:nowrap}
+.journal-table .current-user-row>td{background:#eef6ef;box-shadow:inset 0 1px #d4e5d8,inset 0 -1px #d4e5d8}
+.journal-table .current-user-row>td:first-child{box-shadow:inset 3px 0 var(--green),inset 0 1px #d4e5d8,inset 0 -1px #d4e5d8}
+.current-user-row .student-name{color:var(--green);font-weight:600}
+.current-user-row .student-name small{font-weight:400}
+.current-user-row .avatar{background:#d7e8da;border-color:#eef6ef;color:var(--green)}
+.current-user-row .solve-mark.yes{background:#d9eacc;color:#507c36}
