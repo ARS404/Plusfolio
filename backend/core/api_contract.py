@@ -60,7 +60,7 @@ ROUTES = [
         description='Те же параметры в строке запроса; для полного условия или решения используйте POST, чтобы не упираться в длину URL. '+SEARCH_DESCRIPTION)}),
  ('auth/token', 'automation.token_issue', {'POST': operation('tokenIssue', 'Получить токен по email и паролю', body=TOKEN_BODY,
     example={'login': 'you@example.ru', 'password': '<PASSWORD>', 'name': 'Мой бот', 'expires_in_days': 30, 'read_only': False}, status=201, public=True,
-    description='Не создаёт cookie-сессию. Секрет возвращается один раз. По умолчанию 30 суток, максимум 90. Логин — email регистрации.')}),
+    description='Не создаёт cookie-сессию. Секрет возвращается один раз. По умолчанию 30 суток, максимум 90. Логин — email регистрации. Нужна роль teacher, analyst или admin; аккаунтам только с ролью student API запрещён.')}),
  ('auth/tokens', 'automation.tokens', {
     'GET': operation('tokenList', 'Мои токены без секретов'),
     'POST': operation('tokenCreate', 'Создать ещё один личный токен с проверкой пароля', body=obj({key: value for key,value in TOKEN_BODY['properties'].items() if key != 'login'}, ['password']),
@@ -69,8 +69,8 @@ ROUTES = [
  ('auth/tokens/<uuid:pk>', 'automation.token_revoke', {'DELETE': operation('tokenRevoke', 'Отозвать свой токен по UUID')}),
  ('account', 'api.account', {
     'GET': operation('accountGet', 'Мой профиль, роли и сводка'),
-    'PATCH': operation('accountUpdate', 'Изменить свой профиль', body=obj({'name': STRING, 'graduation_year': INT, 'no_patronymic': BOOL}, ['name']),
-        description='Для роли student обязательны все три поля; для остальных — только name.', example={'name': 'Иванов Иван Иванович', 'graduation_year': 2031, 'no_patronymic': False})}),
+    'PATCH': operation('accountUpdate', 'Изменить свой профиль', body=obj({'name': STRING, 'last_name': STRING, 'first_name': STRING, 'patronymic': STRING, 'graduation_year': INT, 'no_patronymic': BOOL}),
+        description='При совмещении со student обязательны last_name, first_name, patronymic, graduation_year и no_patronymic; иначе только name.', example={'name': 'Имя преподавателя'})}),
  ('account/password', 'api.account_password', {'POST': operation('passwordChange', 'Сменить собственный пароль', body=obj({'current_password': STRING, 'new_password': STRING, 'confirm_password': STRING}, ['current_password','new_password','confirm_password']),
     description='Новый пароль от 12 символов. После смены все прежние API-токены становятся недействительными.')}),
  ('circles', 'api.circles', {
@@ -140,8 +140,8 @@ ROUTES = [
  ('invitations/<uuid:pk>', 'api.invitation_detail', {'DELETE': operation('invitationRevoke', 'Отозвать приглашение, не удаляя историю', 'inviter')}),
  ('accept/<str:token>', 'automation.invitation_accept', {
     'GET': operation('invitationPreview', 'Проверить ссылку приглашения без принятия', public=True),
-    'POST': operation('invitationAccept', 'Явно принять приглашение', body=obj({'name':STRING,'password':STRING,'graduation_year':INT,'no_patronymic':BOOL}),
-        description='Новый аккаунт: name и password; для школьника также graduation_year и no_patronymic. Существующий получатель должен предъявить свой Bearer-токен или сессию. Не создаёт сеанс и токен; после регистрации используйте auth/token.',public=True)}),
+    'POST': operation('invitationAccept', 'Явно принять приглашение', body=obj({'name':STRING,'password':STRING,'last_name':STRING,'first_name':STRING,'patronymic':STRING,'graduation_year':INT,'no_patronymic':BOOL}),
+        description='Новый взрослый аккаунт: name и password. Школьники принимают приглашения на сайте. При добавлении student взрослому аккаунту обязательны last_name, first_name, patronymic, graduation_year и no_patronymic. Существующий получатель должен предъявить свой Bearer-токен или сессию. Не создаёт сеанс и токен; после регистрации используйте auth/token.',public=True)}),
  ('mailbox', 'api.mailbox', {'GET': operation('demoMailbox', 'Локальные письма с тестовыми ссылками', 'inviter',description='Только DEMO. Получателю реальные письма не отправляются. Не публикуйте токены приглашений.')}),
  ('users', 'api.users', {
     'GET': operation('userList', 'Найти аккаунты по ФИО/email/ID и фильтрам', 'admin',parameters=[Q,query('role','Роли.',multiple=True),query('state','Состояния.',multiple=True,schema={'enum':['active','inactive']}),query('graduation_year','Год выпуска.',multiple=True,schema=INT),query('meta','1 — ответ с пагинацией по 30 строк.',schema={'enum':['1']}),query('page','Страница.',schema=INT)]),
@@ -175,6 +175,8 @@ def permitted(user, access):
 
 
 def operations_for(user, *, demo=False, read_only=False):
+    from .people import has_adult_role
+    if not has_adult_role(user):return []
     result = []
     for pattern, view, methods in ROUTES:
         for method, spec in methods.items():

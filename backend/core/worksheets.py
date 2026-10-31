@@ -4,18 +4,19 @@ from django.db import transaction
 from django.db.models import F,Q
 from .models import Worksheet,WorksheetDocument
 from . import services as s
+from .people import has_adult_role
 
 
 def catalogue(user,scope='available'):
     if scope not in {'available','public','mine','all'}:raise ValidationError('Неизвестный раздел листков.')
     rows=Worksheet.objects.filter(published=True)
+    if not has_adult_role(user):return rows.none()
     if scope=='all':s.require(s.admin(user))
     if scope=='mine':return rows.filter(document__author=user,document__current_revision_id=F('pk'))
-    library=bool({'admin','teacher','analyst'}&set(user.roles))
-    if scope=='public':return rows.filter(document__public_revision_id=F('pk')) if library else rows.none()
+    if scope=='public':return rows.filter(document__public_revision_id=F('pk'))
     if s.admin(user):return rows.filter(document__current_revision_id=F('pk'))
     own=Q(document__author=user,document__current_revision_id=F('pk'))
-    if library:own|=Q(document__public_revision_id=F('pk'))&~Q(document__author=user)
+    own|=Q(document__public_revision_id=F('pk'))&~Q(document__author=user)
     return rows.filter(own)
 
 
@@ -29,9 +30,10 @@ def metadata(revision,user):
     document=revision.document
     current=document.current_revision_id==revision.pk
     owner=document.author_id==user.pk
+    library=has_adult_role(user)
     return {'public_id':f'W-{document.number_id}','document_id':str(document.pk),'author_id':document.author_id,'revision':revision.revision,
             'is_public':document.public_revision_id==revision.pk,
-            'can_edit':owner and current and not revision.archived,'can_copy':not revision.archived,
+            'can_edit':library and owner and current and not revision.archived,'can_copy':library and not revision.archived,
             'can_publish':s.admin(user) and current and not revision.archived and document.public_revision_id!=revision.pk,
             'has_unpublished_changes':bool((owner or s.admin(user)) and document.public_revision_id and document.public_revision_id!=document.current_revision_id)}
 
@@ -46,6 +48,7 @@ def fields(revision,overrides=None):
 
 @transaction.atomic
 def update(user,pk,data):
+    s.require(has_adult_role(user),'Личные листки доступны преподавателям, аналитикам и администраторам.')
     document=WorksheetDocument.objects.select_for_update(of=('self',)).select_related('current_revision').filter(pk=pk).first()
     if not document:raise s.NotFound('Листок недоступен.')
     s.require(document.author_id==user.pk,'Редактировать листок может только его автор.')
@@ -58,6 +61,7 @@ def update(user,pk,data):
 
 @transaction.atomic
 def copy(user,revision_id):
+    s.require(has_adult_role(user),'Личные листки доступны преподавателям, аналитикам и администраторам.')
     source=s.worksheets_for(user).filter(pk=revision_id,archived=False).first()
     if not source:raise s.NotFound('Листок недоступен.')
     document=WorksheetDocument.objects.create(author=user,copied_from=source)

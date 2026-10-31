@@ -42,6 +42,7 @@ def user_data(user):
     if not user.is_authenticated:
         return None
     from .people import student_profile_complete
+    from .people import has_adult_role
     student = getattr(user, 'student', None)
     teacher = getattr(user, 'teacher', None)
     result = {
@@ -50,9 +51,11 @@ def user_data(user):
         'teacher_public_id': public_id('teacher', teacher.pk) if teacher else None,
         'name': user.name, 'email': user.email, 'roles': user.roles,
         'is_active': user.is_active, 'student_id': student.pk if student else None,
+        'can_use_api': has_adult_role(user),
     }
     if student:
         result.update(student.education_info(), no_patronymic=student.no_patronymic,
+                      last_name=user.last_name, first_name=user.first_name, patronymic=student.patronymic,
                       profile_complete=student_profile_complete(student))
     return result
 
@@ -63,8 +66,8 @@ def session(request):
 
 @api_view(['GET','PATCH'])
 def account(request):
-    from .account import overview, update_name
-    if request.method=='PATCH':update_name(request.user,request.data)
+    from .account import overview, update_profile
+    if request.method=='PATCH':update_profile(request.user,request.data)
     return Response({'user':user_data(request.user),**overview(request.user)})
 
 @api_view(['POST'])
@@ -458,6 +461,8 @@ def users(request):
                 raise DjangoValidationError('Нельзя убрать последнего администратора.')
         with transaction.atomic():
             account.roles=roles;account.save();s.profiles(account)
+            from .people import has_adult_role
+            if not has_adult_role(account):account.api_tokens.filter(revoked_at=None).update(revoked_at=timezone.now())
             grantids=request.data.get('tags',[]);grants=Tag.objects.filter(pk__in=grantids,kind='circle',archived=False)
             if grants.count()!=len(set(grantids)):raise DjangoValidationError('Недопустимая область аналитика.')
             AnalystGrant.objects.filter(user=account).delete()

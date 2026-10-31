@@ -3,7 +3,7 @@ from django.contrib.auth import authenticate
 from django.utils import timezone
 from django.views.decorators.debug import sensitive_post_parameters, sensitive_variables
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
@@ -73,6 +73,8 @@ def invitation_accept(request, token):
     invitation = s.valid_invitation(token)
     from .models import User
     from .api import user_data
+    if invitation.role == 'student' and not request.user.is_authenticated:
+        raise PermissionDenied('Приглашение школьника нужно принять на сайте.')
     if request.method == 'GET':
         recipient = User.objects.filter(email=invitation.email).first()
         return Response({'email': invitation.email, 'role': invitation.role,

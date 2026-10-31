@@ -75,19 +75,22 @@ def overview(user):
 
 
 @transaction.atomic
-def update_name(user, data):
+def update_profile(user, data):
     if 'student' in user.roles:
         from .people import student_identity
-        if set(data)!={'name','graduation_year','no_patronymic'}:raise ValidationError('Для школьника укажите полное ФИО, наличие отчества и год выпуска.')
+        if set(data)!={'last_name','first_name','patronymic','graduation_year','no_patronymic'}:raise ValidationError('Для школьника укажите фамилию, имя, отчество отдельными полями, наличие отчества и год выпуска.')
         identity=student_identity(data)
         account=User.objects.select_for_update().get(pk=user.pk)
         student=account.student
-        previous={'name':account.name,'graduation_year':student.graduation_year,'no_patronymic':student.no_patronymic}
+        previous={'name':account.name,'last_name':account.last_name,'first_name':account.first_name,
+                  'patronymic':student.patronymic,'graduation_year':student.graduation_year,'no_patronymic':student.no_patronymic}
         if previous!=identity:
-            account.name=identity['name'];account.save(update_fields=['name'])
-            student.graduation_year=identity['graduation_year'];student.no_patronymic=identity['no_patronymic'];student.save(update_fields=['graduation_year','no_patronymic'])
+            for field in ['name','last_name','first_name']:setattr(account,field,identity[field])
+            account.save(update_fields=['name','last_name','first_name'])
+            for field in ['graduation_year','no_patronymic','patronymic']:setattr(student,field,identity[field])
+            student.save(update_fields=['graduation_year','no_patronymic','patronymic'])
             s.audit(user,'account.student_profile',{'previous':previous,**identity})
-        user.name=account.name
+        for field in ['name','last_name','first_name']:setattr(user,field,getattr(account,field))
         user._state.fields_cache.pop('student',None)
         return user
     if set(data) != {'name'} or not isinstance(data['name'], str):

@@ -123,6 +123,8 @@ class CatalogueSearchTests(TestCase):
         self.assertEqual(response.data['results'],[])
         client.force_authenticate(user=self.student)
         response=client.get('/api/v1/problem-search',{'q':'Решение скрыто','fields':['metadata','solution'],'mode':'text'})
+        self.assertEqual(response.status_code,403)
+        response=client.get('/api/problem-search',{'q':'Решение скрыто','fields':['metadata','solution'],'mode':'text'})
         self.assertEqual(response.data['results'],[])
 
     def test_api_schema_read_only_and_validation(self):

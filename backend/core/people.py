@@ -5,6 +5,10 @@ from django.core.exceptions import ValidationError
 from django.db.models import Q
 
 
+def has_adult_role(user):
+    return bool(set(user.roles) & {'teacher', 'analyst', 'admin'})
+
+
 def normalize_name(value):
     return ' '.join(unicodedata.normalize('NFKC',str(value)).casefold().replace('ё','е').split())
 
@@ -40,20 +44,28 @@ def search_people(queryset,text,prefix='',email=True):
 
 def student_identity(data):
     if not isinstance(data,dict):raise ValidationError('Укажите ФИО и год выпуска школьника.')
-    name=data.get('name');year=data.get('graduation_year');no_patronymic=data.get('no_patronymic',False)
-    if not isinstance(name,str) or type(no_patronymic) is not bool:
-        raise ValidationError('Укажите полное ФИО и наличие отчества.')
-    name=' '.join(name.split())
-    words=name.split()
-    if not name or len(name)>120 or len(words)<(2 if no_patronymic else 3) or any((len(word)==1 and unicodedata.name(word,'').startswith(('LATIN','CYRILLIC'))) or not any(char.isalpha() for char in word) or any(not (char.isalpha() or unicodedata.category(char).startswith('M') or char in "-'’ʼ") for char in word) for word in words):
-        raise ValidationError('Укажите фамилию, имя и отчество полностью, без инициалов. Если отчества нет, отметьте это отдельно. До 120 символов.')
+    year=data.get('graduation_year');no_patronymic=data.get('no_patronymic',False)
+    if type(no_patronymic) is not bool:raise ValidationError('Укажите наличие отчества.')
+    parts={}
+    for field,label in [('last_name','фамилию'),('first_name','имя'),('patronymic','отчество')]:
+        value=data.get(field)
+        if not isinstance(value,str):raise ValidationError('Укажите '+label+' отдельным полем.')
+        value=' '.join(value.split())
+        if field=='patronymic' and no_patronymic:
+            if value:raise ValidationError('При отсутствии отчества поле должно быть пустым.')
+        elif not value or any((len(word)==1 and unicodedata.name(word,'').startswith(('LATIN','CYRILLIC'))) or not any(char.isalpha() for char in word) or any(not (char.isalpha() or unicodedata.category(char).startswith('M') or char in "-'’ʼ") for char in word) for word in value.split()):
+            raise ValidationError('Укажите '+label+' полностью, без инициалов.')
+        parts[field]=value
+    name=' '.join(part for part in parts.values() if part)
+    if len(name)>120:raise ValidationError('ФИО — до 120 символов.')
     if type(year) is not int or not 1900<=year<=2200:
         raise ValidationError('Укажите год окончания 11-го класса: целое число от 1900 до 2200.')
-    return {'name':name,'graduation_year':year,'no_patronymic':no_patronymic}
+    return {**parts,'name':name,'graduation_year':year,'no_patronymic':no_patronymic}
 
 
 def student_profile_complete(student):
-    try:student_identity({'name':student.user.name,'graduation_year':student.graduation_year,'no_patronymic':student.no_patronymic})
+    try:student_identity({'last_name':student.user.last_name,'first_name':student.user.first_name,
+                         'patronymic':student.patronymic,'graduation_year':student.graduation_year,'no_patronymic':student.no_patronymic})
     except ValidationError:return False
     return True
 

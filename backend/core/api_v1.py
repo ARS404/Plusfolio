@@ -4,13 +4,14 @@ from rest_framework.authentication import SessionAuthentication
 from . import api, automation, api_reference, search_api, tex_api, catalogue_search_api
 from .api_contract import ROUTES
 from .api_renderers import VersionedJSONRenderer
-from .authentication import BearerAuthentication
+from .authentication import ApiAccessPermission, BearerAuthentication
 
 MODULES = {'api':api, 'automation':automation, 'api_reference':api_reference, 'search_api':search_api, 'tex_api':tex_api, 'catalogue_search_api':catalogue_search_api}
 
 
 def versioned_view(view, *, credential_exchange=False):
-    kwargs = {'renderer_classes':[VersionedJSONRenderer]}
+    kwargs = {'renderer_classes':[VersionedJSONRenderer],
+              'permission_classes':[ApiAccessPermission, *view.cls.permission_classes]}
     if not credential_exchange:
         kwargs['authentication_classes'] = [BearerAuthentication, SessionAuthentication]
     return view.cls.as_view(**kwargs)

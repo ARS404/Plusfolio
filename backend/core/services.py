@@ -70,8 +70,8 @@ def search_problems(queryset,text):
 def worksheets_for(user):
     qs=Worksheet.objects.filter(published=True)
     if admin(user):return qs
-    visible=Q(document__author=user)
-    if {'teacher','analyst'}&set(user.roles):visible|=Q(document__public_revision_id=F('pk'))
+    from .people import has_adult_role
+    visible=Q(document__author=user)|Q(document__public_revision_id=F('pk')) if has_adult_role(user) else Q(pk__in=[])
     visible|=Q(Exists(WorksheetIssue.objects.filter(worksheet_id=OuterRef('pk'),circle__in=circles_for(user))))
     if 'student' in user.roles:visible|=Q(Exists(Assignment.objects.filter(issue__worksheet_id=OuterRef('pk'),student__user=user)))
     return qs.filter(visible)
@@ -175,6 +175,8 @@ def update_topic(user,pk,data):
 
 @transaction.atomic
 def create_material(user,kind,data,*,_document=None,_base=None):
+    from .people import has_adult_role
+    if kind=='worksheet':require(has_adult_role(user),'Создание личных листков школьнику недоступно.')
     require(_document.author_id==user.pk if kind=='worksheet' and _document else admin(user) or 'teacher' in user.roles)
     title=str(data.get('title') or '').strip()
     if len(title)>180 or kind=='worksheet' and not title: raise ValidationError('Укажите название листка, до 180 символов.' if kind=='worksheet' else 'Название задачи — до 180 символов.')
@@ -386,7 +388,8 @@ def accept_invitation(token,data,current_user=None):
         require(user.is_active)
         if invitation.role=='student' and 'student' not in user.roles:
             from .people import student_identity
-            identity=student_identity(data);user.name=identity['name']
+            identity=student_identity(data)
+            for field in ['name','last_name','first_name']:setattr(user,field,identity[field])
         user.roles=sorted(set(user.roles)|{invitation.role});user.save()
     else:
         password=str(data.get('password',''));validate_password(password)
@@ -395,11 +398,13 @@ def accept_invitation(token,data,current_user=None):
             identity=student_identity(data)
         name=identity['name'] if identity else str(data.get('name','')).strip()
         if not name:raise ValidationError('Укажите имя.')
-        user=User.objects.create_user(invitation.email,password,name=name,roles=[invitation.role])
+        names={field:identity[field] for field in ['first_name','last_name']} if identity else {}
+        user=User.objects.create_user(invitation.email,password,name=name,roles=[invitation.role],**names)
     profiles(user)
     if identity:
         user.student.graduation_year=identity['graduation_year'];user.student.no_patronymic=identity['no_patronymic']
-        user.student.save(update_fields=['graduation_year','no_patronymic'])
+        user.student.patronymic=identity['patronymic']
+        user.student.save(update_fields=['graduation_year','no_patronymic','patronymic'])
     if invitation.role=='student':
         Enrollment.objects.get_or_create(circle=invitation.circle,student=user.student,left_at=None)
         assign_issues(user.student,invitation.circle.issues.all())

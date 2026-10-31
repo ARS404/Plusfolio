@@ -16,11 +16,11 @@ class DocumentationContentTests(SimpleTestCase):
 
     def test_student_receives_only_reading_and_personal_workflows(self):
         ids = self.ids('student')
-        self.assertTrue({'getting-started', 'account', 'my-materials', 'worksheet-copies',
+        self.assertTrue({'getting-started', 'account', 'my-materials',
                          'circle-journal', 'pdf-documents', 'analytics', 'journal-export'} <= ids)
         self.assertTrue(ids.isdisjoint({'invitations', 'journal-editing', 'circle-members',
                                       'problem-library', 'problem-creation', 'worksheet-creation',
-                                      'worksheet-issue', 'tex-sources', 'users-and-roles',
+                                      'worksheet-issue', 'worksheet-copies', 'tex-sources', 'api-authentication', 'api-tokens', 'users-and-roles',
                                       'circle-administration', 'worksheet-publication', 'tags-and-topics'}))
 
     def test_teacher_receives_writing_but_no_administration(self):

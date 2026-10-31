@@ -129,7 +129,7 @@ class DomainTests(TestCase):
         invitation=s.invite(self.teacher,'new@plusfolio.example','student',self.circle)
         import json
         token=json.loads(s.cipher().decrypt(invitation.letters.get().encrypted_payload.encode()))['token']
-        user=s.accept_invitation(token,{'name':'Иванов Иван Иванович','graduation_year':2031,'password':'DemoPassword2026!'})
+        user=s.accept_invitation(token,{'last_name':'Иванов','first_name':'Иван','patronymic':'Иванович','graduation_year':2031,'password':'DemoPassword2026!'})
         self.assertEqual(user.student.assignments.count(),self.circle.issues.count())
         with self.assertRaises(ValidationError):s.accept_invitation(token,{'name':'Дубль','password':'DemoPassword2026!'})
     def test_revoked_inviter_access_blocks_pending_invitation(self):
@@ -980,7 +980,7 @@ class DomainTests(TestCase):
 
     def test_account_name_update_is_self_only_and_audited(self):
         original_admin=self.admin.name
-        response=self.client_for(self.student).patch('/api/account',{'name':'  Иванов   Иван Иванович  ','graduation_year':2031,'no_patronymic':False},format='json')
+        response=self.client_for(self.student).patch('/api/account',{'last_name':'  Иванов  ','first_name':' Иван ','patronymic':'Иванович','graduation_year':2031,'no_patronymic':False},format='json')
         self.assertEqual(response.status_code,200)
         self.assertEqual(response.data['user']['name'],'Иванов Иван Иванович')
         self.student.refresh_from_db();self.admin.refresh_from_db()
@@ -1218,12 +1218,12 @@ class DomainTests(TestCase):
         client=APIClient();url='/api/accept/'+token
         self.assertTrue(client.get(url).json()['student_profile_required'])
         self.assertEqual(client.post(url,[],format='json').status_code,400)
-        base={'name':'Иванов Иван Иванович','graduation_year':2031,'password':'DemoPassword2026!'}
-        for changes in [{'name':'Иванов И. И.'},{'name':'Иванов И И'},{'name':'Иванов Иван'},{'name':''},{'graduation_year':None},{'graduation_year':'2031'},{'graduation_year':True},{'graduation_year':2031.5},{'graduation_year':2201}]:
+        base={'last_name':'Иванов','first_name':'Иван','patronymic':'Иванович','graduation_year':2031,'password':'DemoPassword2026!'}
+        for changes in [{'first_name':'И.'},{'first_name':'И'},{'patronymic':''},{'last_name':''},{'graduation_year':None},{'graduation_year':'2031'},{'graduation_year':True},{'graduation_year':2031.5},{'graduation_year':2201}]:
             self.assertEqual(client.post(url,{**base,**changes},format='json').status_code,400)
             self.assertFalse(User.objects.filter(email=invitation.email).exists())
             invitation.refresh_from_db();self.assertEqual(invitation.state,'pending')
-        result=client.post(url,{**base,'name':' Иванов   Иван Иванович ','roles':['admin']},format='json')
+        result=client.post(url,{**base,'last_name':' Иванов ','first_name':' Иван ','roles':['admin']},format='json')
         self.assertEqual(result.status_code,200);self.assertEqual(result.json()['user']['name'],'Иванов Иван Иванович')
         account=User.objects.get(email=invitation.email)
         self.assertEqual(account.roles,['student']);self.assertEqual(account.student.graduation_year,2031)
@@ -1232,7 +1232,7 @@ class DomainTests(TestCase):
 
     def test_no_patronymic_is_explicit_and_other_roles_keep_normal_registration(self):
         invitation=s.invite(self.teacher,'no-patronymic@plusfolio.example','student',self.circle)
-        account=s.accept_invitation(self._invite_token(invitation),{'name':'Ким Александр','graduation_year':2031,'no_patronymic':True,'password':'DemoPassword2026!'})
+        account=s.accept_invitation(self._invite_token(invitation),{'last_name':'Ким','first_name':'Александр','patronymic':'','graduation_year':2031,'no_patronymic':True,'password':'DemoPassword2026!'})
         self.assertTrue(account.student.no_patronymic)
         invitation=s.invite(self.admin,'new-teacher@plusfolio.example','teacher',self.circle)
         account=s.accept_invitation(self._invite_token(invitation),{'name':'Новый преподаватель','password':'DemoPassword2026!'})
@@ -1243,7 +1243,7 @@ class DomainTests(TestCase):
         self.assertTrue(self.client_for(self.teacher).get('/api/accept/'+token).json()['student_profile_required'])
         with self.assertRaises(ValidationError):s.accept_invitation(token,{},self.teacher)
         self.teacher.refresh_from_db();self.assertNotIn('student',self.teacher.roles)
-        account=s.accept_invitation(token,{'name':'Тестов Преподаватель Иванович','graduation_year':2031},self.teacher)
+        account=s.accept_invitation(token,{'last_name':'Тестов','first_name':'Преподаватель','patronymic':'Иванович','graduation_year':2031},self.teacher)
         self.assertEqual(set(account.roles),{'student','teacher'})
         self.assertEqual(account.student.graduation_year,2031)
         invitation=s.invite(self.admin,self.student.email,'student',self.foreign);token=self._invite_token(invitation)
@@ -1254,17 +1254,17 @@ class DomainTests(TestCase):
     def test_student_account_cannot_replace_full_name_with_alias_or_clear_year_and_search_refreshes(self):
         pupil=self._named_student();client=self.client_for(pupil)
         self.assertEqual(client.patch('/api/account',['name','graduation_year','no_patronymic'],format='json').status_code,400)
-        base={'name':pupil.name,'graduation_year':2031,'no_patronymic':False}
-        for change in [{'name':'Вася'},{'graduation_year':None},{'no_patronymic':'false'},{'roles':['admin']},{'email':'new@plusfolio.example'}]:
+        base={'last_name':'Семенов','first_name':'Алексей','patronymic':'Иванович','graduation_year':2031,'no_patronymic':False}
+        for change in [{'first_name':'В.'},{'last_name':''},{'patronymic':''},{'graduation_year':None},{'no_patronymic':'false'},{'roles':['admin']},{'email':'new@plusfolio.example'}]:
             self.assertEqual(client.patch('/api/account',{**base,**change},format='json').status_code,400)
-        result=client.patch('/api/account',{**base,'name':'Петров Алексей Андреевич','graduation_year':2032},format='json')
+        result=client.patch('/api/account',{**base,'last_name':'Петров','patronymic':'Андреевич','graduation_year':2032},format='json')
         self.assertEqual(result.status_code,200);self.assertTrue(result.data['user']['profile_complete']);self.assertEqual(result.data['user']['graduation_year'],2032)
         path=f'/api/circles/{self.circle.pk}/student-search'
         teacher=self.client_for(self.teacher)
         self.assertEqual(teacher.get(path,{'q':'семенов'}).data,[])
         self.assertEqual(teacher.get(path,{'q':'андреевич ПЕТРОВ'}).data[0]['id'],pupil.student.pk)
         self.assertEqual(AuditEvent.objects.filter(kind='account.student_profile',actor=pupil).count(),1)
-        self.assertEqual(client.patch('/api/account',{**base,'name':'Петров Алексей Андреевич','graduation_year':2032},format='json').status_code,200)
+        self.assertEqual(client.patch('/api/account',{**base,'last_name':'Петров','patronymic':'Андреевич','graduation_year':2032},format='json').status_code,200)
         self.assertEqual(AuditEvent.objects.filter(kind='account.student_profile',actor=pupil).count(),1)
 
 

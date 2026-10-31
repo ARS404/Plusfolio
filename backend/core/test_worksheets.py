@@ -101,36 +101,46 @@ class WorksheetWorkspaceTests(TestCase):
         self.assertEqual(response.status_code,409);self.assertEqual(Worksheet.objects.count(),before)
         self.assertIsNone(WorksheetDocument.objects.get(pk=data['document_id']).public_revision_id)
 
-    def test_analyst_and_student_can_edit_personal_copies_without_revealing_solutions(self):
-        for user in [self.analyst,self.student]:
-            with self.subTest(user=user.pk):
-                data=self.copy(user)
-                self.assertEqual(self.update(user,data,title='Моя подборка').status_code,200)
-                if user==self.student:
-                    self.assertTrue(all('solution' not in row for row in data['problems']))
-                    source=self.client_for(user).get('/api/materials/worksheet/'+data['id']+'/tex')
-                    self.assertEqual(source.status_code,403)
-                public=self.client_for(user).post('/api/worksheet-documents/'+data['document_id']+'/publish',{'version':1},format='json')
-                self.assertEqual(public.status_code,403)
+    def test_analyst_can_edit_personal_copies_but_cannot_publish_them(self):
+        data=self.copy(self.analyst)
+        self.assertEqual(self.update(self.analyst,data,title='Моя подборка').status_code,200)
+        self.assertEqual(self.client_for(self.analyst).post('/api/worksheet-documents/'+data['document_id']+'/publish',{'version':2},format='json').status_code,403)
+
+    def test_students_cannot_copy_or_edit_even_legacy_owned_worksheets(self):
+        client=self.client_for(self.student)
+        before=WorksheetDocument.objects.count()
+        self.assertEqual(client.post(f'/api/worksheets/{self.source.pk}/copy',{},format='json').status_code,403)
+        self.assertEqual(WorksheetDocument.objects.count(),before)
+        self.assertEqual(client.get('/api/materials/worksheet').data,[])
+        self.assertTrue(client.get('/api/my-materials/worksheet').data)
+        issued=client.get('/api/materials/worksheet/'+str(self.source.pk))
+        self.assertEqual(issued.status_code,200)
+        self.assertFalse(issued.data['can_copy']);self.assertFalse(issued.data['can_edit'])
+        data=self.copy(self.mentor)
+        WorksheetDocument.objects.filter(pk=data['document_id']).update(author=self.student)
+        Worksheet.objects.filter(pk=data['id']).update(author=self.student)
+        self.assertEqual(client.get('/api/worksheet-documents/'+data['document_id']).status_code,404)
+        self.assertEqual(self.update(self.student,data,title='Нельзя').status_code,403)
+        self.assertEqual(client.get('/api/materials/worksheet/'+data['id']).status_code,404)
+        self.student.roles=['student','analyst'];self.student.save()
+        self.assertEqual(self.update(self.student,data,title='Теперь можно').status_code,200)
+        self.assertEqual(client.post(f'/api/worksheets/{self.source.pk}/copy',{},format='json').status_code,201)
 
     def test_hidden_copy_cannot_be_copied_or_injected_into_another_sheet(self):
         hidden=self.copy()
         self.assertEqual(self.client_for(self.teacher).post('/api/worksheets/'+hidden['id']+'/copy',{},format='json').status_code,404)
-        personal=self.copy(self.student)
+        personal=self.copy(self.analyst)
         topic=Topic.objects.filter(parent__isnull=False,is_other=False,archived=False).first()
         unknown=s.create_material(self.teacher,'problem',{'title':'Не выдавалась','statement':'Условие','solution':'Скрыто','topics':[str(topic.pk)]})
-        response=self.update(self.student,personal,problems=[str(unknown.pk)])
+        response=self.update(self.analyst,personal,problems=[str(unknown.pk)])
         self.assertEqual(response.status_code,400)
 
-    def test_copy_does_not_keep_solution_access_after_membership_is_revoked(self):
-        problem=self.source.items.first().problem
-        Discussion.objects.update_or_create(circle=self.circle,problem=problem,defaults={'discussed':True,'solution_visible':True,'changed_by':self.teacher})
+    def test_former_adult_role_does_not_keep_personal_copy_access(self):
+        self.student.roles=['student','teacher'];self.student.save();s.profiles(self.student)
         data=self.copy(self.student)
-        self.assertIn('solution',next(row for row in data['problems'] if row['id']==str(problem.pk)))
-        Enrollment.objects.filter(student__user=self.student,left_at=None).update(left_at=timezone.now())
+        self.student.roles=['student'];self.student.save()
         response=self.client_for(self.student).get('/api/worksheet-documents/'+data['document_id'])
-        self.assertEqual(response.status_code,200)
-        self.assertTrue(all('solution' not in row and 'solution_tex' not in row for row in response.data['problems']))
+        self.assertEqual(response.status_code,404)
 
     def test_new_worksheets_are_private_even_for_admin_and_keep_typed_filters(self):
         topic=Topic.objects.filter(parent__isnull=False,is_other=False,archived=False).first()

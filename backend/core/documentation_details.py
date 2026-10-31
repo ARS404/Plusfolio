@@ -15,7 +15,7 @@ DETAILS = {
      'U-ID относится к аккаунту, S-ID — к школьнику, T-ID — к преподавателю. При совмещении ролей это один аккаунт с несколькими профилями, а не несколько входов.'],
     ['Для школьника ФИО и год выпуска сохраняются вместе. Укажите полные слова без инициалов; отсутствие отчества отмечается отдельным флажком.',
      'Год выпуска — ожидаемый год окончания 11-го класса, а не текущий год или год окончания 9-го класса. При переводе или повторном обучении исправьте ожидаемый год.',
-     'Смена пароля завершает другие браузерные сеансы и делает все ранее выпущенные API-токены недействительными. Для бота понадобится новый токен.']),
+     'Смена пароля завершает другие браузерные сеансы; текущий сеанс сохраняется.']),
  'search-and-filters': (
     ['Фильтрация не меняет исходные данные и не удаляет ранее выбранные задачи из собираемого листка. Пустой фильтр не означает пустую выборку: он снимает ограничение соответствующего вида.',
      'Пример: города Москва и Казань вместе с тегом задач «Олимпиадная» означают задачи с этим тегом в доступных кружках любого из двух городов.',
@@ -160,7 +160,7 @@ PROCEDURES = {
                       'Прочитайте GET /api/v1/circles/{pk}, затем issues, members и journal этого кружка. Проверяйте can_write и can_analyse_group.',
                       'Выполните GET /api/v1/account для профиля, ролей, ID и сводки.']],
  'account': [['GET /api/v1/account возвращает user и ролевые сводки.',
-              'PATCH /api/v1/account принимает name. Если есть роль student, отправляйте вместе name, graduation_year и no_patronymic.',
+              'PATCH /api/v1/account принимает name. При совмещении взрослой роли со student, отправляйте вместе last_name, first_name, patronymic, graduation_year и no_patronymic.',
               'POST /api/v1/account/password принимает current_password, new_password и confirm_password. После успеха получите новый API-токен.']],
  'circle-journal': [['Найдите доступный кружок через GET /api/v1/circles?q=C-12.',
                      'GET /api/v1/circles/{pk}/issues возвращает числовые id выдач, worksheet_id версии и document_id логического листка.',
@@ -344,7 +344,10 @@ def automation_sections():
 
 def extend_documentation(sections, user, *, demo=False, audience='human', read_only=False):
     from .robot_workflows import workflow_sections, mandatory_instructions, POLICY_VERSION, CATEGORY
-    sections = deepcopy(sections) + automation_sections() + workflow_sections(user,read_only=read_only)
+    from .people import has_adult_role
+    api_access=has_adult_role(user)
+    if not api_access:audience='human'
+    sections = deepcopy(sections) + (automation_sections() + workflow_sections(user,read_only=read_only) if api_access else [])
     operations = {item['id']:item for item in operations_for(user, demo=demo, read_only=read_only)}
     for section in sections:
         detail = DETAILS.get(section['id'])
@@ -372,7 +375,8 @@ def extend_documentation(sections, user, *, demo=False, audience='human', read_o
                 block.pop('api_steps', None)
     order = ['Начало работы','Кружки и результаты','Материалы','Приглашения и доступ','Администрирование','API и автоматизация', CATEGORY]
     sections.sort(key=lambda section: (0 if audience=='robot' and section.get('required_for_robots') else 1, order.index(section['category'])))
-    return {'instruction_policy_version':POLICY_VERSION, 'mandatory_instructions':mandatory_instructions(user,read_only=read_only),
-            'sections': sections, 'audience': audience, 'api_base': '/api/v1', 'read_only_token': read_only,
+    return {'instruction_policy_version':POLICY_VERSION, 'mandatory_instructions':mandatory_instructions(user,read_only=read_only) if api_access else [],
+            'sections': sections, 'audience': audience, 'api_base': '/api/v1' if api_access else None, 'read_only_token': read_only,
+            'can_use_api':api_access,
             'markdown_url': '/api/documentation?audience='+audience+'&download=markdown',
-            'openapi_url': '/api/v1/openapi.json'}
+            'openapi_url': '/api/v1/openapi.json' if api_access else None}

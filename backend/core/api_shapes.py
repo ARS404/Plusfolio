@@ -111,6 +111,8 @@ SCHEMAS={
     'teacher_public_id':nullable(text(),'T-ID профиля преподавателя; null, если профиля нет.'),
     'name':text('Имя или полное ФИО.'),'email':EMAIL,'roles':ROLES,'is_active':boolean('Аккаунт действующий.'),
     'student_id':nullable(number(),'Числовой ID профиля школьника, если есть.'),**EDUCATION,
+    'can_use_api':boolean('Есть роль преподавателя, аналитика или администратора.'),
+    'last_name':text('Фамилия школьника.'),'first_name':text('Имя школьника.'),'patronymic':text('Отчество школьника; пусто при no_patronymic=true.'),
     'no_patronymic':boolean('Явно указано отсутствие отчества; только у профиля школьника.'),
     'profile_complete':boolean('ФИО и год выпуска заполнены по правилам регистрации школьника.'),
     'tags':array(number(),'Числовые ID тегов области аналитика; в ответах управления пользователями.')},
@@ -269,7 +271,7 @@ SCHEMAS['GuideSection']=record('Раздел документации',{
  ['id','category','title','summary','blocks','links'])
 SCHEMAS['GuideCatalogue']=record('Доступная документация',{
  'instruction_policy_version':text('Версия обязательного контракта для роботов.'),'mandatory_instructions':array(ref('MandatoryInstruction'),'MUST прочитать все инструкции, применимые к запрошенному сценарию.'),
- 'sections':array(ref('GuideSection')),'audience':text(enum=['human','robot']),'api_base':text('Базовый путь /api/v1.'),
+ 'sections':array(ref('GuideSection')),'audience':text(enum=['human','robot']),'can_use_api':boolean('Есть право программного доступа.'),'api_base':text('Базовый путь /api/v1.'),
  'read_only_token':boolean('Текущий токен ограничен чтением.'),'markdown_url':text('URL скачивания руководства.'),'openapi_url':text('URL OpenAPI-схемы.')},
  ['sections','audience','api_base','read_only_token','markdown_url','openapi_url','instruction_policy_version','mandatory_instructions'])
 SCHEMAS['Release']=record('Версия продукта и сборки',{'version':text('Версия продукта по SemVer.'),'status':text(enum=['development','released']),'revision':text('Git SHA, SHA-dirty либо unknown для архива без ревизии.')},['version','status','revision'])
@@ -459,7 +461,7 @@ def request_schema_for(operation_id, schema):
     if operation_id=='memberAdd':
         result['description']='Передайте ровно одно: email зарегистрированного школьника либо student_id из подсказок.'
     if operation_id=='accountUpdate':
-        result['description']='Для роли student обязательны name, graduation_year и no_patronymic вместе. Для остальных — только name.'
+        result['description']='При совмещении со student обязательны last_name, first_name, patronymic, graduation_year и no_patronymic. Для остальных — только name.'
     if operation_id=='materialCreate':
         result['description']='kind=problem: условие и решение в тексте или TeX. kind=worksheet: непустые title и problems. Для обоих видов обязателен непустой topics.'
     if operation_id=='worksheetUpdate':
@@ -467,7 +469,7 @@ def request_schema_for(operation_id, schema):
     if operation_id=='invitationCreate':
         result['description']='student/teacher: нужны circle_ids. analyst: нужны tags кружков. admin: область не передаётся.'
     if operation_id=='invitationAccept':
-        result['description']='Новый аккаунт: name и password. Для нового профиля школьника также graduation_year и no_patronymic. Существующий получатель входит под своим аккаунтом.'
+        result['description']='Новый взрослый аккаунт: name и password. Школьники регистрируются на сайте. При добавлении student взрослому аккаунту обязательны last_name, first_name, patronymic, graduation_year и no_patronymic. Существующий получатель входит под своим аккаунтом.'
     if operation_id=='journalMark':
         result['description']='kind=solve: обязателен student_id. Для discussion и solution-visibility он не нужен. version всегда относится к изменяемой записи.'
     return result

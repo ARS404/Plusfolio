@@ -10,8 +10,17 @@ from django.utils.crypto import constant_time_compare, salted_hmac
 from django.views.decorators.debug import sensitive_variables
 from rest_framework.authentication import BaseAuthentication, get_authorization_header
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied, Throttled, ValidationError
+from rest_framework.permissions import BasePermission
 
 from .models import ApiToken, User
+from .people import has_adult_role
+
+
+class ApiAccessPermission(BasePermission):
+    message = 'API доступен преподавателям, аналитикам и администраторам.'
+
+    def has_permission(self, request, view):
+        return not request.user.is_authenticated or has_adult_role(request.user)
 
 
 def password_stamp(user):
@@ -53,6 +62,8 @@ def create_token(user, data):
     user = User.objects.select_for_update().get(pk=user.pk)
     if not user.is_active:
         raise AuthenticationFailed('Аккаунт недоступен.')
+    if not has_adult_role(user):
+        raise PermissionDenied(ApiAccessPermission.message)
     if not constant_time_compare(verified_stamp, password_stamp(user)):
         raise AuthenticationFailed('Пароль изменился. Повторите вход.')
     if ApiToken.objects.filter(user=user, revoked_at=None, expires_at__gt=timezone.now(), password_stamp=password_stamp(user)).count() >= 20:
@@ -89,7 +100,7 @@ class BearerAuthentication(BaseAuthentication):
             raise AuthenticationFailed('Используйте заголовок Authorization: Bearer <token>.')
         digest = hashlib.sha256(parts[1]).hexdigest()
         token = ApiToken.objects.select_related('user').filter(digest=digest, revoked_at=None, expires_at__gt=timezone.now()).first()
-        if token is None or not token.user.is_active or not constant_time_compare(token.password_stamp, password_stamp(token.user)):
+        if token is None or not token.user.is_active or not has_adult_role(token.user) or not constant_time_compare(token.password_stamp, password_stamp(token.user)):
             raise AuthenticationFailed('Токен недействителен, истёк или отозван.')
         self_revoke = request.method == 'DELETE' and request.path == '/api/v1/auth/tokens/current'
         search_read = request.method == 'POST' and request.path == '/api/v1/problem-search'

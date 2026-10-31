@@ -13,8 +13,8 @@ export type DocumentationSection = {
  blocks:DocumentationBlock[];links:{label:string;href:string}[];operations?:DocumentationOperation[];
 };
 export type DocumentationCatalogue = {
- sections:DocumentationSection[];audience?:'human'|'robot';api_base?:string;read_only_token?:boolean;
- markdown_url?:string;openapi_url?:string;
+ sections:DocumentationSection[];audience?:'human'|'robot';api_base?:string|null;read_only_token?:boolean;
+ markdown_url?:string;openapi_url?:string|null;can_use_api?:boolean;
  instruction_policy_version?:string;
  mandatory_instructions?:{section_id:string;title:string;version:string;required:boolean;applies_when:string;can_execute:boolean;url:string}[];
 };

@@ -105,6 +105,10 @@ class ActualResponseContractsTests(TestCase):
         call_command('seed_demo',verbosity=0)
         cls.teacher=User.objects.get(email='teacher@plusfolio.example')
         cls.student=User.objects.get(email='student@plusfolio.example')
+        # Versioned personal-material routes require an additional adult role.
+        cls.student.roles=['student','teacher'];cls.student.save()
+        from .services import profiles
+        profiles(cls.student)
         cls.admin=User.objects.get(email='admin@plusfolio.example')
         cls.circle=Circle.objects.get(name='Математическая мастерская')
         cls.issue=cls.circle.issues.first()

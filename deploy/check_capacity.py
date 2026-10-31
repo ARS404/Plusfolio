@@ -93,7 +93,10 @@ class Pilot:
     def request(self,session,name,path,body=None):
         start=time.monotonic();value={};payload=b'';status=0
         try:
-            headers={'Authorization':'Bearer '+session['token'],'Content-Type':'application/json'}
+            headers={'Content-Type':'application/json'}
+            if session['role']=='student':
+                headers.update(session['headers']);path=path.replace('/api/v1/','/api/',1)
+            else:headers['Authorization']='Bearer '+session['token']
             request=urllib.request.Request(self.values['PUBLIC_URL']+path,headers=headers,
                 data=json.dumps(body).encode() if body is not None else None)
             with urllib.request.urlopen(request,context=self.tls,timeout=60) as response:

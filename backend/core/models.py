@@ -37,6 +37,7 @@ class Student(models.Model):
     user=models.OneToOneField(User,on_delete=models.PROTECT,related_name='student')
     graduation_year=models.PositiveSmallIntegerField(null=True,blank=True,validators=[MinValueValidator(1900),MaxValueValidator(2200)])
     no_patronymic=models.BooleanField(default=False)
+    patronymic=models.CharField(max_length=120,blank=True,default='')
     class Meta:
         constraints=[models.CheckConstraint(condition=models.Q(graduation_year__isnull=True)|models.Q(graduation_year__range=(1900,2200)),name='student_graduation_year_range')]
     def education_info(self,on_date=None):

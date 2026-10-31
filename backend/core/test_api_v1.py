@@ -154,6 +154,11 @@ class DocumentationRepresentationsTests(SimpleTestCase):
                 robot=documentation_for(user,audience='robot',demo=True)
                 self.assertEqual({s['id'] for s in human['sections']},{s['id'] for s in robot['sections']})
                 by_id={section['id']:section for section in human['sections']}
+                if roles==['student']:
+                    self.assertEqual(robot['audience'],'human')
+                    self.assertFalse(robot['can_use_api'])
+                    self.assertFalse(any(section['category']=='API и автоматизация' for section in robot['sections']))
+                    continue
                 self.assertEqual(robot['sections'][0]['id'],'robot-required-rules')
                 for right in robot['sections']:
                     left=by_id[right['id']]
@@ -188,7 +193,7 @@ class DocumentationRepresentationsTests(SimpleTestCase):
                 ids.extend(value['operationId'] for value in methods.values())
             self.assertEqual(len(ids),len(set(ids)))
             self.assertEqual('userList' in ids,'admin' in roles)
-            self.assertEqual('myMaterials' in ids,'student' in roles)
+            self.assertEqual('myMaterials' in ids,'student' in roles and bool(set(roles)&{'teacher','analyst','admin'}))
             self.assertEqual('journalMark' in ids,bool(set(roles)&{'teacher','admin'}))
 
     def test_read_only_schema_excludes_writes_and_demo_mailbox_is_conditional(self):
@@ -260,7 +265,7 @@ class ApiWorkflowTests(TestCase):
 
     def test_student_and_analyst_cannot_write_journal_or_browse_foreign_data(self):
         problem=self.source.items.first().problem
-        for user in [self.student,self.analyst]:
+        for user in [self.analyst]:
             client=self.client_for(user)
             self.assertEqual(client.get(f'/api/v1/circles/{self.foreign.pk}').status_code,404)
             self.assertEqual(client.post(f'/api/v1/circles/{self.circle.pk}/problems/{problem.pk}/discussion',{'value':True,'version':0},format='json').status_code,403)
@@ -271,13 +276,13 @@ class ApiWorkflowTests(TestCase):
         self.assertEqual(client.get(f'/api/v1/circles/{self.circle.pk}').status_code,404)
 
     def test_robot_documentation_and_markdown_do_not_leak_admin_guides(self):
-        client=self.client_for(self.student)
+        client=self.client_for(self.analyst)
         result=client.get('/api/v1/documentation')
         self.assertEqual(result.status_code,200)
         self.assertEqual(result.data['audience'],'robot')
         self.assertEqual(json.loads(client.get('/api/v1/openapi.json').content)['servers'][0]['url'],'/api/v1')
         self.assertNotIn('users-and-roles',[s['id'] for s in result.data['sections']])
-        self.assertEqual(client.get('/api/v1/documentation/invitations').status_code,404)
+        self.assertEqual(client.get('/api/v1/documentation/journal-editing').status_code,404)
         markdown=client.get('/api/v1/documentation',{'download':'markdown'})
         self.assertEqual(markdown.status_code,200)
         self.assertTrue(markdown['Content-Type'].startswith('text/markdown'))
@@ -287,23 +292,33 @@ class ApiWorkflowTests(TestCase):
     def test_student_solution_visibility_cannot_be_bypassed_through_api(self):
         problem=self.source.items.first().problem
         Discussion.objects.filter(problem=problem).update(discussed=False,solution_visible=False)
-        client=self.client_for(self.student)
-        hidden=client.get(f'/api/v1/my-problems/{problem.pk}')
+        client=APIClient();client.force_login(self.student)
+        hidden=client.get(f'/api/my-problems/{problem.pk}')
         self.assertEqual(hidden.status_code,200)
         self.assertNotIn('solution',hidden.data)
         Discussion.objects.update_or_create(circle=self.circle,problem=problem,defaults={'discussed':True,'solution_visible':True,'changed_by':self.teacher})
-        shown=client.get(f'/api/v1/my-problems/{problem.pk}')
+        shown=client.get(f'/api/my-problems/{problem.pk}')
         self.assertIn('solution',shown.data)
 
-    def test_existing_recipient_accepts_invitation_with_own_bearer(self):
+    def test_student_invitation_is_only_accepted_through_the_browser(self):
         from . import services as s
         invitation=s.invite(self.teacher,self.student.email,'student',self.circle)
         token=json.loads(s.cipher().decrypt(invitation.letters.get().encrypted_payload.encode()))['token']
         anonymous=APIClient(enforce_csrf_checks=True)
-        self.assertEqual(anonymous.get('/api/v1/accept/'+token).status_code,200)
+        self.assertEqual(anonymous.get('/api/v1/accept/'+token).status_code,403)
         self.assertEqual(anonymous.post('/api/v1/accept/'+token,{},format='json').status_code,403)
-        accepted=self.client_for(self.student).post('/api/v1/accept/'+token,{},format='json')
-        self.assertEqual(accepted.status_code,200,accepted.data)
-        self.assertNotIn('sessionid',accepted.cookies)
-        self.assertNotIn('access_token',accepted.data)
-        self.assertEqual(self.client_for(self.student).post('/api/v1/accept/'+token,{},format='json').status_code,400)
+        self.assertEqual(anonymous.get('/api/accept/'+token).status_code,200)
+        anonymous.force_login(self.student)
+        anonymous.get('/api/session')
+        accepted=anonymous.post('/api/accept/'+token,{},format='json',HTTP_X_CSRFTOKEN=anonymous.cookies['csrftoken'].value)
+        self.assertEqual(accepted.status_code,200,accepted.content)
+
+    def test_adult_can_accept_an_additional_student_role_through_api(self):
+        from . import services as s
+        invitation=s.invite(self.teacher,self.teacher.email,'student',self.circle)
+        token=json.loads(s.cipher().decrypt(invitation.letters.get().encrypted_payload.encode()))['token']
+        result=self.client_for(self.teacher).post('/api/v1/accept/'+token,
+            {'last_name':'Тестов','first_name':'Преподаватель','patronymic':'Иванович','graduation_year':2031},format='json')
+        self.assertEqual(result.status_code,200,result.data)
+        self.assertEqual(set(result.data['user']['roles']),{'teacher','student'})
+        self.assertEqual(result.data['user']['first_name'],'Преподаватель')

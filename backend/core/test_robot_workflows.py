@@ -17,6 +17,10 @@ class MandatoryWorkflowTests(SimpleTestCase):
                 with self.subTest(roles=roles,read_only=read_only):
                     user=SimpleNamespace(roles=roles)
                     data=documentation_for(user,audience='robot',read_only=read_only)
+                    if roles==['student']:
+                        self.assertEqual(data['mandatory_instructions'],[])
+                        self.assertEqual(data['audience'],'human')
+                        continue
                     self.assertEqual(data['sections'][0]['id'],RULES_ID)
                     self.assertEqual(data['instruction_policy_version'],POLICY_VERSION)
                     required={item['section_id']:item for item in data['mandatory_instructions']}

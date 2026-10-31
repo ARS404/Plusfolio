@@ -3,8 +3,13 @@ import json
 from datetime import timedelta
 from pathlib import Path
 
+from django.conf import settings
 from django.core.management import call_command
 from django.contrib.auth.hashers import make_password
+from django.contrib.auth import login
+from django.contrib.sessions.backends.db import SessionStore
+from django.http import HttpRequest
+from django.middleware.csrf import get_token
 from django.db import transaction
 from django.utils import timezone
 from core import services as s
@@ -81,9 +86,17 @@ def seed():
     for user in selected:
         circle = s.circles_for(user).first()
         issue = circle.issues.order_by('number').first()
-        _, token = create_token(user, {'name':'Isolated capacity check', 'expires_in_days':1})
-        sessions.append({'role':user.roles[0], 'token':token, 'circle':str(circle.pk),
-                         'issue':issue.pk, 'worksheet':str(issue.worksheet_id)})
+        if user.roles==['student']:
+            request=HttpRequest();request.session=SessionStore()
+            login(request,user,backend='django.contrib.auth.backends.ModelBackend')
+            request.session.save();csrf=get_token(request)
+            auth={'headers':{'Cookie':f'{settings.SESSION_COOKIE_NAME}={request.session.session_key}; {settings.CSRF_COOKIE_NAME}={request.META["CSRF_COOKIE"]}',
+                             'X-CSRFToken':csrf,'Origin':settings.PUBLIC_URL}}
+        else:
+            _,token=create_token(user,{'name':'Isolated capacity check','expires_in_days':1})
+            auth={'token':token}
+        sessions.append({'role':user.roles[0],**auth,'circle':str(circle.pk),
+                         'issue':issue.pk,'worksheet':str(issue.worksheet_id)})
     return {'sessions':sessions, 'circle':str(circles[0].pk),
             'worksheets':[str(sheet.pk) for sheet in sheets],
             'counts':{'users':User.objects.count(),'circles':len(circles),'worksheets':len(sheets),
