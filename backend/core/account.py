@@ -25,8 +25,7 @@ def overview(user):
     active = circles.filter(archived=False)
     teaching = set(CircleTeacher.objects.filter(teacher__user=user, ended_at=None).values_list('circle_id', flat=True)) if 'teacher' in user.roles else set()
     attending = set(Enrollment.objects.filter(student__user=user, left_at=None).values_list('circle_id', flat=True)) if 'student' in user.roles else set()
-    analytical = s.analyst_circles_for(user)
-    analyst_ids = set(analytical.values_list('pk', flat=True))
+    analyst_ids = set(s.analyst_circles_for(user).values_list('pk', flat=True))
     counts = {'total': Count('pk'), 'active': Count('pk', filter=Q(archived=False))}
     for role, ids in [('teacher', teaching), ('student', attending), ('analyst', analyst_ids)]:
         if role in user.roles:
@@ -91,7 +90,7 @@ def update_profile(user, data):
             student.save(update_fields=['graduation_year','no_patronymic','patronymic'])
             s.audit(user,'account.student_profile',{'previous':previous,**identity})
         for field in ['name','last_name','first_name']:setattr(user,field,getattr(account,field))
-        user._state.fields_cache.pop('student',None)
+        user.student=student
         return user
     if set(data) != {'name'} or not isinstance(data['name'], str):
         raise ValidationError('В этом разделе можно изменить только имя.')

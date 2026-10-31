@@ -67,12 +67,10 @@ def retrieve(rows,kind,text,limit=20,semantic=True):
 
 
 def search_issued(issues,text,semantic=False):
-    from uuid import UUID
-    from .identifiers import typed_id,search_issues,validate_search
+    from .identifiers import typed_id,search_issues,validate_search,uuid_id
     text=validate_search(text)
     if not text:return issues
-    try:UUID(text);identity=True
-    except ValueError:identity=bool(typed_id(text) or text.isascii() and text.isdigit())
+    identity=bool(uuid_id(text) or typed_id(text) or text.isascii() and text.isdigit())
     if identity or not semantic:return search_issues(issues,text)
     rows=Worksheet.objects.filter(pk__in=issues.values('worksheet_id'))
     ranked,_=retrieve(rows,'worksheet',text,limit=100)

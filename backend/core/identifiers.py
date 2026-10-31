@@ -27,6 +27,11 @@ def validate_search(text):
     return text.strip()
 
 
+def uuid_id(text: str) -> UUID | None:
+    try:return UUID(text)
+    except ValueError:return None
+
+
 def search_entities(queryset,text,kind,number_field='number_id',text_fields=(),uuid_fields=('pk',)):
     text=validate_search(text)
     if not text:return queryset
@@ -37,10 +42,9 @@ def search_entities(queryset,text,kind,number_field='number_id',text_fields=(),u
     for field in text_fields:condition|=Q(**{field+'__icontains':text})
     if text.isascii() and text.isdigit() and len(text)<=19 and 0<int(text)<=MAX_NUMBER:
         condition|=Q(**{number_field:int(text)})
-    try:
-        identity=UUID(text)
+    identity=uuid_id(text)
+    if identity:
         for field in uuid_fields:condition|=Q(**{field:identity})
-    except ValueError:pass
     return queryset.filter(condition)
 
 

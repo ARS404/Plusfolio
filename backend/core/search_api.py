@@ -5,7 +5,7 @@ from rest_framework.exceptions import Throttled
 from rest_framework.response import Response
 from . import services as s, filters as f, queries as read
 from .api import material_data
-from .identifiers import typed_id
+from .identifiers import typed_id, uuid_id
 from .search import retrieve
 
 
@@ -44,10 +44,7 @@ def problem_search(request):
     topics = s.topic_ids_in_branch(f.query_values(params, 'topic'))
     if topics is not None:
         problems = problems.filter(topics__pk__in=topics).distinct()
-    from uuid import UUID
-    try:UUID(text);is_uuid=True
-    except ValueError:is_uuid=False
-    if is_uuid or typed_id(text) or ((set(field) if isinstance(field,list) else {field}) != {'solution'} and text.isdigit() and len(text) <= 18):
+    if uuid_id(text) or typed_id(text) or ((set(field) if isinstance(field,list) else {field}) != {'solution'} and text.isdigit() and len(text) <= 18):
         rows = list(read.material_rows(s.search_problems(problems, text), 'problem')[:limit])
         metadata = {'semantic': False, 'pending': 0, 'notice': ''}
         matches = {row.pk: {'kind': 'identifier', 'fields': set(), 'excerpt': ''} for row in rows}

@@ -92,8 +92,8 @@ def report(user, params):
         if cid in group_ids:
             if pids:circle_students[cid].update(recipients)
             _merge_recipients(circle_problem_students[cid],pids,recipients,unions)
-    student_ids = set().union(*problem_students.values()) if problem_students else set()
-    all_problem_ids = set().union(*worksheet_problems.values()) if worksheet_problems else set()
+    student_ids = set().union(*set(problem_students.values()))
+    all_problem_ids = set().union(*worksheet_problems.values())
     solved_by_problem, solved_by_student = defaultdict(set), defaultdict(set)
     for sid,pid in Solve.objects.filter(solved=True, student_id__in=student_ids, problem_id__in=all_problem_ids).values_list('student_id', 'problem_id').iterator(chunk_size=2000):
         solved_by_problem[pid].add(sid); solved_by_student[sid].add(pid)
@@ -155,15 +155,12 @@ def report(user, params):
                 seen.add(current); result.append(current); current = nodes[current]['parent_id']
             ancestor_cache[tid] = result
         return ancestor_cache[tid]
-    problem_topics = {}
     direct_topics=defaultdict(set)
     for pid,tid in Problem.topics.through.objects.filter(problem_id__in=selected_ids).values_list('problem_id','topic_id'):direct_topics[pid].add(tid)
-    for pid in problems:
-        problem_topics[pid] = {tid for node in direct_topics[pid] for tid in ancestors(node) if nodes[tid]['parent_id'] is not None}
-        if not problem_topics[pid]: problem_topics[pid] = {None}
     topic_totals = {}
     for pid,recipients in problem_students.items():
-        for tid in problem_topics[pid]:
+        topics = {tid for node in direct_topics[pid] for tid in ancestors(node) if nodes[tid]['parent_id'] is not None} or {None}
+        for tid in topics:
             total = topic_totals.setdefault(tid, {'assigned': 0, 'solved': 0, 'students': set(), 'problems': set()})
             total['assigned'] += len(recipients); total['solved'] += len(problem_solved[pid])
             total['students'].update(recipients); total['problems'].add(pid)
@@ -179,17 +176,18 @@ def report(user, params):
     discussion = None
     pending_discussed = set()
     if group_ids:
-        discussion_states = { (state.circle_id, state.problem_id): state for state in Discussion.objects.filter(circle_id__in=group_ids, problem_id__in=selected_ids) }
+        discussion_states = {(cid,pid):(covered,shown) for cid,pid,covered,shown in Discussion.objects.filter(
+            circle_id__in=group_ids & circle_ids, problem_id__in=selected_ids).values_list('circle_id','problem_id','discussed','solution_visible')}
         denominator = discussed = visible = 0
         for circle in Circle.objects.filter(pk__in=group_ids & circle_ids).only('id','number','name','city','archived').order_by('name'):
             recipients_by_problem = circle_problem_students[circle.pk]; pids = circle_problem_ids[circle.pk]
             assigned = sum(map(len,recipients_by_problem.values()))
             done = sum(len(recipients & solved_by_problem[pid]) for pid,recipients in recipients_by_problem.items())
-            covered = sum(bool(discussion_states.get((circle.pk, pid)) and discussion_states[circle.pk, pid].discussed) for pid in pids)
-            shown = sum(bool(discussion_states.get((circle.pk, pid)) and discussion_states[circle.pk, pid].solution_visible) for pid in pids)
+            covered = sum(discussion_states.get((circle.pk, pid),(False,False))[0] for pid in pids)
+            shown = sum(discussion_states.get((circle.pk, pid),(False,False))[1] for pid in pids)
             for pid,recipients in recipients_by_problem.items():
                 state = discussion_states.get((circle.pk, pid))
-                if state and state.discussed and not recipients <= solved_by_problem[pid]: pending_discussed.add(pid)
+                if state and state[0] and not recipients <= solved_by_problem[pid]: pending_discussed.add(pid)
             denominator += len(pids); discussed += covered; visible += shown
             circle_rows.append({'id': str(circle.pk), 'public_id':f'C-{circle.number_id}', 'name': circle.name, 'city': circle.city, 'archived': circle.archived,
                                 'recipients': len(circle_students[circle.pk]), 'worksheet_count': len(circle_sheets[circle.pk]),

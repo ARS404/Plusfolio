@@ -22,9 +22,7 @@ export default function TopicTreeFilter({topics,value,onChange,label='Темы �
   }
   for(const siblings of children.values())siblings.sort((a,b)=>Number(a.is_other)-Number(b.is_other)||a.sort_order-b.sort_order||a.name.localeCompare(b.name,'ru'));
   const roots=topics.filter(topic=>!topic.parent_id).flatMap(root=>children.get(root.id)||[]);
-  const sizes=new Map<string,number>();
-  for(const topic of topics){if(!topic.parent_id)continue;for(const id of [topic.id,...(parents.get(topic.id)||[])])sizes.set(id,(sizes.get(id)||0)+1)}
-  return {nodes,children,parents,paths,roots,sizes};
+  return {nodes,children,parents,paths,roots};
  },[topics]);
  const selected=new Set(value);
  const partial=new Set(value.flatMap(id=>index.parents.get(id)||[]));
@@ -34,7 +32,7 @@ export default function TopicTreeFilter({topics,value,onChange,label='Темы �
   for(const topic of topics){if(!topic.parent_id||!found.has(topic.id)&&!matchesEntity(topic,needle,index.paths.get(topic.id)||''))continue;result.add(topic.id);for(const parent of index.parents.get(topic.id)||[])result.add(parent)}
   return result;
  },[index,query,topics,semantic.data]);
- const normalize=(ids:string[])=>{const unique=[...new Set(ids)];const choices=new Set(unique);return unique.filter(id=>index.nodes.get(id)?.parent_id&&!(index.parents.get(id)||[]).some(parent=>choices.has(parent)))};
+ const normalize=(ids:string[])=>{const choices=new Set(ids);return [...choices].filter(id=>index.nodes.get(id)?.parent_id&&!(index.parents.get(id)||[]).some(parent=>choices.has(parent)))};
  const toggle=(id:string)=>onChange(selected.has(id)?value.filter(item=>item!==id):normalize([...value,id]));
  const close=()=>{if(details.current){details.current.open=false;details.current.querySelector('summary')?.focus()}};
  useEffect(()=>{
@@ -48,10 +46,10 @@ export default function TopicTreeFilter({topics,value,onChange,label='Темы �
   return <li key={node.id}><div className={'topic-filter-row'+(checked?' checked':'')+(mixed?' partial':'')+(parent?' inherited':'')} style={{'--topic-depth':depth} as React.CSSProperties}>
    {children.length?<button type="button" className="topic-filter-toggle" aria-label={(open?'Свернуть ветку ':'Раскрыть ветку ')+path} aria-expanded={open} onClick={()=>setExpanded(current=>{const next=new Set(current);next.has(node.id)?next.delete(node.id):next.add(node.id);return next})}>{open?<ChevronDown size={15}/>:<ChevronRight size={15}/>}</button>:<span className="topic-filter-spacer"/>}
    <label><input type="checkbox" aria-label={'Выбрать тему '+path} aria-checked={mixed?'mixed':checked} checked={checked} disabled={!!parent} ref={input=>{if(input)input.indeterminate=mixed}} onChange={()=>toggle(node.id)}/><span title={parent?'Включено выбранной веткой «'+index.nodes.get(parent)?.name+'»':path}>{node.name}</span><EntityId value={node.public_id}/></label>
-   {node.archived&&<small className="topic-filter-archived">Архив</small>}{selected.has(node.id)&&<small className="topic-filter-branch">{(index.sizes.get(node.id)||1)>1?'Вся ветка':'Выбрано'}</small>}
+   {node.archived&&<small className="topic-filter-archived">Архив</small>}{selected.has(node.id)&&<small className="topic-filter-branch">{children.length?'Вся ветка':'Выбрано'}</small>}
   </div>{children.length>0&&open&&render(children,depth+1)}</li>;
  })}</ul>;
- return <div className="filter-field analytics-topic topic-tree-filter"><span id={labelId}>{label}</span><details ref={details} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();close();details.current?.querySelector('summary')?.focus()}}}>
+ return <div className="filter-field analytics-topic topic-tree-filter"><span id={labelId}>{label}</span><details ref={details} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();close()}}}>
  <summary aria-label={'Выбор: '+label} aria-describedby={labelId+'-selection'}><FolderTree size={16}/><span id={labelId+'-selection'}>{value.length?'Выбрано веток: '+value.length:'Все темы'}</span><ChevronDown size={15}/></summary>
  <div className="topic-filter-panel" aria-labelledby={labelId}><div className="topic-filter-search"><Search size={16}/><input type="search" aria-label="Поиск в дереве тем" placeholder="Название, путь или ID TOP-123" value={query} onChange={event=>setQuery(event.target.value)}/>{query&&<button type="button" className="icon-button" aria-label="Очистить поиск тем" onClick={()=>setQuery('')}><X size={14}/></button>}</div>
  <CatalogueSearchStatus {...semantic}/><p className="topic-filter-hint">Можно выбрать несколько веток. Каждая включает все подтемы. Чтобы выбрать часть ветки, сначала снимите выбор с родителя.</p>

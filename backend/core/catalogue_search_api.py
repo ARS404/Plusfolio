@@ -1,5 +1,4 @@
 """Metadata search for list views and pickers. Never ranks inaccessible rows."""
-from uuid import UUID
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from rest_framework.decorators import api_view
@@ -7,7 +6,7 @@ from rest_framework.exceptions import Throttled
 from rest_framework.response import Response
 from . import services as s, filters as f, queries as read
 from .models import Topic
-from .identifiers import typed_id, search_entities, public_id
+from .identifiers import typed_id, search_entities, public_id, uuid_id
 from .catalogue_search import retrieve
 
 
@@ -49,9 +48,7 @@ def catalogue_search(request):
         if scope!='available':raise ValidationError('Для тем scope=available.')
         rows=Topic.objects.exclude(parent_id=None)
         number='number_id';fields=('name',);uuids=('pk',)
-    try:UUID(text);is_uuid=True
-    except ValueError:is_uuid=False
-    identity=bool(typed_id(text) or is_uuid or text.isascii() and text.isdigit())
+    identity=bool(typed_id(text) or uuid_id(text) or text.isascii() and text.isdigit())
     if identity:
         matched=list(search_entities(rows,text,kind,number,fields,uuids).values_list('pk',flat=True)[:limit])
         ranked=[(pk,{'kind':'identifier','excerpt':''}) for pk in matched]

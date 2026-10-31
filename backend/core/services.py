@@ -55,7 +55,7 @@ def problems_for(user):
     return qs.filter(q)
 
 def search_problems(queryset,text):
-    from .identifiers import typed_id,validate_search
+    from .identifiers import typed_id,validate_search,uuid_id
     text=validate_search(text)
     if not text:return queryset
     typed=typed_id(text)
@@ -64,8 +64,8 @@ def search_problems(queryset,text):
     import re
     number=re.sub(r'^(?:задача\s*)?[№#]?\s*','',text,flags=re.I)
     if number.isdigit() and len(number)<=18:q|=Q(number_id=int(number))|Q(source_id=number)
-    try:q|=Q(pk=UUID(text))
-    except (ValueError,AttributeError):pass
+    identity=uuid_id(text)
+    if identity:q|=Q(pk=identity)
     return queryset.filter(q)
 def worksheets_for(user):
     qs=Worksheet.objects.filter(published=True)

@@ -2,6 +2,7 @@ from datetime import timedelta
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TestCase, TransactionTestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.test import APIClient
@@ -69,7 +70,9 @@ class StudentAccountTests(TestCase):
         for field in data:
             missing={key:value for key,value in data.items() if key!=field}
             self.assertEqual(self.client.patch('/api/account',missing,format='json').status_code,400,field)
-        response=self.client.patch('/api/account',data,format='json')
+        with CaptureQueriesContext(connection) as queries:
+            response=self.client.patch('/api/account',data,format='json')
+        self.assertEqual(sum('FROM "core_student"' in query['sql'] for query in queries),1)
         self.assertEqual(response.status_code,200,response.data)
         for field,value in data.items():self.assertEqual(response.data['user'][field],value)
         self.assertEqual(response.data['user']['name'],'де ла Круз Анна Мария Ивановна')
