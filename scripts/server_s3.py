@@ -6,6 +6,12 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
+def stored_checksum(response):
+    # Object metadata names are HTTP headers. Yandex returns `Sha256`, while
+    # other S3 implementations commonly return `sha256`.
+    return {key.lower():value for key,value in response.get('Metadata',{}).items()}.get('sha256')
+
+
 def client(values=None):
     import boto3
     from botocore.config import Config
@@ -34,7 +40,7 @@ def upload(path, values=None):
     except ClientError as error:
         if error.response.get('ResponseMetadata',{}).get('HTTPStatusCode')!=404:raise
     else:
-        if existing['ContentLength']!=path.stat().st_size or existing.get('Metadata',{}).get('sha256')!=checksum:
+        if existing['ContentLength']!=path.stat().st_size or stored_checksum(existing)!=checksum:
             raise RuntimeError('S3 backup name already exists with different content')
         return 's3://' + bucket + '/' + key
     # One transfer thread and bounded parts fit the existing backup memory limit.
@@ -42,7 +48,7 @@ def upload(path, values=None):
         ExtraArgs={'StorageClass':values.get('BACKUP_S3_STORAGE_CLASS','STANDARD'),'Metadata':{'sha256':checksum}},
         Config=TransferConfig(use_threads=False, multipart_chunksize=8*1024*1024))
     head = s3.head_object(Bucket=bucket, Key=key)
-    if head['ContentLength'] != path.stat().st_size or head.get('Metadata', {}).get('sha256') != checksum:
+    if head['ContentLength'] != path.stat().st_size or stored_checksum(head) != checksum:
         raise RuntimeError('Проверка загруженного S3-бэкапа не прошла')
     return 's3://' + bucket + '/' + key
 
@@ -62,7 +68,7 @@ def download(uri, destination, values):
             with response['Body'] as source:
                 for chunk in iter(lambda:source.read(1024*1024), b''):
                     target.write(chunk);digest.update(chunk);size += len(chunk)
-            if size != response['ContentLength'] or digest.hexdigest() != response.get('Metadata',{}).get('sha256'):
+            if size != response['ContentLength'] or digest.hexdigest() != stored_checksum(response):
                 raise RuntimeError('Контрольная сумма S3-бэкапа не совпала')
         except Exception:
             destination.unlink(missing_ok=True)

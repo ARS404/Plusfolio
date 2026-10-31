@@ -121,7 +121,7 @@ class S3Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'plusfolio-test.tar.gz.age';path.write_bytes(b'synthetic-encrypted-bytes')
             checksum=hashlib.sha256(path.read_bytes()).hexdigest()
-            head={'ContentLength':path.stat().st_size,'Metadata':{'sha256':checksum}}
+            head={'ContentLength':path.stat().st_size,'Metadata':{'Sha256':checksum}}
             missing=ClientError({'ResponseMetadata':{'HTTPStatusCode':404},'Error':{'Code':'NoSuchKey'}},'HeadObject')
             s3=Mock();s3.head_object.side_effect=[missing,head]
             with patch('server_s3.client',return_value=s3):
@@ -169,7 +169,7 @@ class S3Tests(unittest.TestCase):
         body=b'encrypted synthetic archive';checksum=hashlib.sha256(body).hexdigest()
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'backup.age';s3=Mock()
-            def response(**kwargs):return {'Body':io.BytesIO(body),'ContentLength':len(body),'Metadata':{'sha256':checksum}}
+            def response(**kwargs):return {'Body':io.BytesIO(body),'ContentLength':len(body),'Metadata':{'Sha256':checksum}}
             s3.get_object.side_effect=response
             with patch('server_s3.client',return_value=s3):
                 server_s3.download('s3://own/instance/backup.tar.gz.age',path,self.values)
