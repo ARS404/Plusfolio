@@ -322,6 +322,15 @@ class Invitation(NumberedEntity):
     state=models.CharField(max_length=16,default='pending')
     created_at=models.DateTimeField(auto_now_add=True)
 
+class MailBudget(models.Model):
+    id=models.PositiveSmallIntegerField(primary_key=True,default=1,editable=False)
+    daily_limit=models.PositiveIntegerField(default=100)
+    day=models.DateField(null=True)
+    used=models.PositiveIntegerField(default=0)
+    class Meta:
+        constraints=[models.CheckConstraint(condition=models.Q(id=1),name='one_mail_budget')]
+
+
 class EmailOutbox(models.Model):
     invitation=models.ForeignKey(Invitation,on_delete=models.PROTECT,related_name='letters')
     encrypted_payload=models.TextField()

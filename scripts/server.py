@@ -214,7 +214,7 @@ def run(args):
         print('Save .deploy/backup.key separately; encrypted backups and retention are running.')
     elif args.command=='import-images':
         server_host.tools_ready();operate(args,values)
-    elif args.command in {'status','logs','backup','prune-backups','download-backup','export-images','restore-database','stop','version'}:
+    elif args.command in {'status','logs','backup','prune-backups','download-backup','export-images','restore-database','stop','version','mail-limit'}:
         server_host.tools_ready()
         server_host.project_containers(docker,values,ROOT)
         operate(args,values)
@@ -227,6 +227,7 @@ def operate(args,values):
     if args.command=='version':
         compose('exec','-T','web','python','-c',INSTALLED_VERSION_CODE)
     elif args.command=='status':compose('ps')
+    elif args.command=='mail-limit':compose('exec','-T','web','python','backend/manage.py','mail_limit',*(['--set',str(args.limit)] if args.limit is not None else []))
     elif args.command=='logs':compose('logs','--tail','80',*(args.services or []))
     elif args.command=='backup':compose('exec','-T','backup','python','scripts/server_backup.py')
     elif args.command=='prune-backups':compose('exec','-T','backup','python','scripts/server_backup.py','--prune-only')
@@ -292,6 +293,7 @@ if __name__=='__main__':
     publish=sub.add_parser('publish-images');publish.add_argument('--registry',required=True);publish.add_argument('--output',type=Path,required=True);publish.add_argument('--platform',default='linux/amd64');publish.add_argument('--cache-registry')
     fetch=sub.add_parser('fetch-backup');fetch.add_argument('uri');fetch.add_argument('file',type=Path);fetch.add_argument('--config',help='Private recovery JSON containing backup_s3 settings')
     for name in ['up','status','backup','prune-backups','stop','doctor','check-public','version']:sub.add_parser(name)
+    mail=sub.add_parser('mail-limit');mail.add_argument('--set',type=int,dest='limit')
     proxy=sub.add_parser('proxy-config');proxy.add_argument('kind',choices=['nginx','caddy','traefik'])
     logs=sub.add_parser('logs');logs.add_argument('services',nargs='*')
     restore=sub.add_parser('restore-backup');restore.add_argument('file');restore.add_argument('--key');restore.add_argument('--into',required=True);restore.add_argument('--image',help='Loaded application image for recovery on a fresh host')

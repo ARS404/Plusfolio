@@ -42,7 +42,7 @@ SESSION_COOKIE_SECURE=not DEMO
 CSRF_COOKIE_SECURE=not DEMO
 X_FRAME_OPTIONS='DENY'
 SECURE_CONTENT_TYPE_NOSNIFF=True
-EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend' if DEMO else 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend' if DEMO else 'core.mail_backend.EmailBackend'
 
 TEX_COMPILER=os.environ.get('PLUSFOLIO_TEX_COMPILER',str(LOCAL_DIR/'tools'/'tectonic'))
 

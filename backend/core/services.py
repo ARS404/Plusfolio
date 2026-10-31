@@ -361,6 +361,8 @@ def invite(user,email,role,circle=None,tag_ids=None):
     tags=list(Tag.objects.filter(pk__in=tag_ids or [],kind='circle',archived=False))
     if role=='analyst' and (not tags or len(tags)!=len(set(tag_ids or []))):raise ValidationError('Выберите теги кружков для аналитика.')
     Invitation.objects.filter(email=email,role=role,circle=circle,state='pending').update(state='revoked')
+    from .mail_backend import check_invitation_capacity
+    check_invitation_capacity()
     token=secrets.token_urlsafe(32)
     invitation=Invitation.objects.create(email=email,role=role,circle=circle,created_by=user,token_hash=hashlib.sha256(token.encode()).hexdigest(),expires_at=timezone.now()+timedelta(days=7))
     invitation.tags.set(tags)

@@ -3,11 +3,12 @@ import hashlib,json,smtplib
 from email.utils import parseaddr
 from datetime import timedelta
 from django.conf import settings
-from django.core.mail import EmailMultiAlternatives
+from django.core.mail import EmailMultiAlternatives,get_connection
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from .models import EmailOutbox
+from .mail_backend import DailyMailLimit
 from . import services as s
 
 MAX_ATTEMPTS=8
@@ -34,10 +35,11 @@ def deliver_batch(limit=10):
             url=settings.PUBLIC_URL+'/#/accept/'+payload['token']
             circle='Кружок: '+payload['circle']+'\n' if payload.get('circle') else ''
             text='Вас пригласили в Plusfolio.\n'+circle+'\nПринять приглашение: '+url+'\n\nСсылка действует до '+invitation.expires_at.strftime('%d.%m.%Y %H:%M UTC')+'. Если вы не ожидали письмо, просто проигнорируйте его.'
-            message=EmailMultiAlternatives(payload['subject'],text,settings.DEFAULT_FROM_EMAIL,[payload['to']],
+            message=EmailMultiAlternatives(payload['subject'],text,settings.DEFAULT_FROM_EMAIL,[payload['to']],connection=get_connection(outbox=True),
                 headers={'Message-ID':f'<invitation-{letter.pk}@{parseaddr(settings.DEFAULT_FROM_EMAIL)[1].rsplit("@",1)[-1]}>',
                          'Auto-Submitted':'auto-generated'})
             if message.send(fail_silently=False)!=1:raise OSError('SMTP did not accept message')
+        except DailyMailLimit:state='cancelled';error='daily_limit'
         except (s.NotFound,s.PermissionDenied,ValueError,KeyError):state='cancelled';error='invalid_invitation'
         except Exception as exc:
             # Errors never contain provider text, addresses, credentials or message bodies.
@@ -52,6 +54,7 @@ def deliver_batch(limit=10):
         updates={'state':state,'locked_until':None,'error_code':error,
             'next_attempt_at':now+timedelta(seconds=min(3600,30*2**(letter.attempts-1))) if state=='retry' else None,
             'sent_at':timezone.now() if state=='sent' else None}
+        if error=='daily_limit':updates['attempts']=letter.attempts-1
         EmailOutbox.objects.filter(pk=letter.pk,locked_until=letter.locked_until).update(**updates)
         done+=1
     return done

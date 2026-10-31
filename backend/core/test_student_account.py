@@ -85,6 +85,7 @@ class StudentAccountTests(TestCase):
 class StudentIdentityMigrationTests(TransactionTestCase):
     def test_legacy_names_are_preserved_and_only_student_tokens_revoked(self):
         executor=MigrationExecutor(connection)
+        latest=executor.loader.graph.leaf_nodes()
         previous=[('core','0014_material_order_indexes')]
         current=[('core','0015_student_name_parts')]
         try:
@@ -114,4 +115,4 @@ class StudentIdentityMigrationTests(TransactionTestCase):
             self.assertIsNotNone(ApiToken.objects.get(user=pupil).revoked_at)
             self.assertIsNone(ApiToken.objects.get(user_id=mixed.pk).revoked_at)
         finally:
-            MigrationExecutor(connection).migrate(current)
+            MigrationExecutor(connection).migrate(latest)
