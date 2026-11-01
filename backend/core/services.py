@@ -188,10 +188,16 @@ def create_material(user,kind,data,*,_document=None,_base=None):
     model=Problem if kind=='problem' else Worksheet
     extra={}
     if kind=='worksheet':
+        from .content import numbering_start
         document=_document or WorksheetDocument.objects.create(author=user)
-        extra={'document':document,'revision':document.current_revision.revision+1 if document.current_revision_id else 1}
+        extra={'document':document,'revision':document.current_revision.revision+1 if document.current_revision_id else 1,'numbering_start':numbering_start(data.get('numbering_start',1))}
     if kind=='problem':
         extra={'statement':str(data.get('statement','')).strip(),'solution':str(data.get('solution','')).strip()}
+        from .content import image_list
+        from .image_assets import authorize_images
+        for field in ['statement_images','solution_images']:
+            extra[field]=image_list(data.get(field,[]))
+        authorize_images(user,extra['statement_images']+extra['solution_images'])
         if data.get('copy_of'):
             original=problems_for(user).filter(pk=data['copy_of']).first()
             if not original:raise NotFound('Исходная задача недоступна.')
@@ -200,18 +206,27 @@ def create_material(user,kind,data,*,_document=None,_base=None):
         for field in ['statement_tex','solution_tex']:
             extra[field]=str(data.get(field,'')).strip()
             if extra[field]:validate_tex(extra[field])
-        if not (extra['statement'] or extra['statement_tex']) or not (extra['solution'] or extra['solution_tex']):raise ValidationError('Заполните условие и решение текстом или TeX.')
+        if not (extra['statement'] or extra['statement_tex'] or extra['statement_images']) or not (extra['solution'] or extra['solution_tex'] or extra['solution_images']):raise ValidationError('Заполните условие и решение текстом или TeX.')
     material=model.objects.create(title=title,description=str(data.get('description','')),author=user,**extra)
     material.topics.set(topics);material.tags.set(tags)
+    if kind=='problem':
+        material.statement_assets.set([image['id'] for image in material.statement_images])
+        material.solution_assets.set([image['id'] for image in material.solution_images])
     if kind=='worksheet':
-        ids=data.get('problems',[])
-        if not ids or len(ids)!=len(set(ids)): raise ValidationError('Добавьте неповторяющиеся задачи.')
+        from .content import normalize_blocks,create_blocks
+        from .image_assets import authorize_images
+        raw=data.get('blocks') if 'blocks' in data else [{'kind':'problem','problem_id':pk} for pk in data.get('problems',[])]
+        blocks,ids=normalize_blocks(raw)
+        if 'blocks' in data and 'problems' in data and data['problems']!=ids:raise ValidationError('Список задач должен совпадать с порядком блоков.')
+        authorize_images(user,[image for block in blocks if block['kind']=='text' for image in block['images']])
         available=problems_for(user).filter(archived=False)
         if _base is not None:available=(available|Problem.objects.filter(items__worksheet=_base)).distinct()
         valid={str(p.pk):p for p in available.filter(pk__in=ids)}
         if len(valid)!=len(ids): raise ValidationError('Недоступная задача.')
-        WorksheetItem.objects.bulk_create([WorksheetItem(worksheet=material,problem=valid[str(pk)],position=index+1) for index,pk in enumerate(ids)])
-        if any(problem.statement_tex or problem.solution_tex for problem in valid.values()):
+        journal_flags={block['problem_id']:block['include_in_journal'] for block in blocks if block['kind']=='problem'}
+        WorksheetItem.objects.bulk_create([WorksheetItem(worksheet=material,problem=valid[str(pk)],position=index+1,include_in_journal=journal_flags[pk]) for index,pk in enumerate(ids)])
+        create_blocks(material,blocks)
+        if any(problem.statement_tex or problem.solution_tex or problem.statement_images or problem.solution_images for problem in valid.values()) or any(block.get('tex') or block.get('images') for block in blocks):
             from .documents import project_for,render_pdf
             render_pdf(project_for(material,[valid[str(pk)] for pk in ids],visible_solution_ids(user,[p.pk for p in valid.values()]),True))
     material.topic_catalog_version_id=TopicCatalogVersion.objects.order_by('-pk').values_list('pk',flat=True).first()
@@ -308,7 +323,9 @@ class Conflict(Exception):pass
 @transaction.atomic
 def mark(user,circle,problem_id,data,discussion=False,solution_visibility=False):
     require(can_write(user,circle))
-    problem=Problem.objects.only('pk').filter(pk=problem_id,items__worksheet__issues__circle=circle).first()
+    scope={'items__worksheet__issues__circle':circle}
+    if not (discussion or solution_visibility):scope['items__include_in_journal']=True
+    problem=Problem.objects.only('pk').filter(pk=problem_id,**scope).first()
     if not problem:raise ValidationError('Задача не выдавалась этому кружку.')
     value=data.get('value');version=data.get('version')
     if type(value) is not bool or type(version) is not int or version<0:raise ValidationError('Передайте да/нет и ожидаемую версию.')

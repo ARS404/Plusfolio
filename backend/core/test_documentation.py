@@ -20,7 +20,7 @@ class DocumentationContentTests(SimpleTestCase):
                          'circle-journal', 'pdf-documents', 'analytics', 'journal-export'} <= ids)
         self.assertTrue(ids.isdisjoint({'invitations', 'journal-editing', 'circle-members',
                                       'problem-library', 'problem-creation', 'worksheet-creation',
-                                      'worksheet-issue', 'worksheet-copies', 'tex-sources', 'api-authentication', 'api-tokens', 'users-and-roles',
+                                      'worksheet-issue', 'worksheet-copies', 'worksheet-builder', 'tex-sources', 'api-authentication', 'api-tokens', 'users-and-roles',
                                       'circle-administration', 'worksheet-publication', 'tags-and-topics'}))
 
     def test_teacher_receives_writing_but_no_administration(self):
@@ -83,6 +83,20 @@ class DocumentationContentTests(SimpleTestCase):
         sections = self.catalogue('analyst')
         account = next(s for s in sections if s['id'] == 'account')
         self.assertFalse(any(b['title'] == 'ФИО и текущий класс' for b in account['blocks']))
+
+    def test_builder_guide_and_api_operations_follow_author_permissions(self):
+        for roles in [('teacher',),('analyst',),('admin',)]:
+            with self.subTest(roles=roles):
+                section=next(s for s in self.catalogue(*roles) if s['id']=='worksheet-builder')
+                content=str(section['blocks'])
+                for term in ['В плюсник','Нумерация задач','PNG/JPEG','TikZ','Обновить PDF']:
+                    self.assertIn(term,content)
+                robot=documentation_for(SimpleNamespace(roles=list(roles)),audience='robot',read_only=True)
+                builder=next(s for s in robot['sections'] if s['id']=='worksheet-builder')
+                operations={operation['id'] for operation in builder['operations']}
+                self.assertIn('worksheetPreview',operations)
+                self.assertNotIn('imageUpload',operations)
+                self.assertNotIn('worksheetUpdate',operations)
 
 
 @override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])

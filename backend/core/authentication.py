@@ -103,7 +103,7 @@ class BearerAuthentication(BaseAuthentication):
         if token is None or not token.user.is_active or not has_adult_role(token.user) or not constant_time_compare(token.password_stamp, password_stamp(token.user)):
             raise AuthenticationFailed('Токен недействителен, истёк или отозван.')
         self_revoke = request.method == 'DELETE' and request.path == '/api/v1/auth/tokens/current'
-        search_read = request.method == 'POST' and request.path == '/api/v1/problem-search'
+        search_read = request.method == 'POST' and request.path in {'/api/v1/problem-search','/api/v1/worksheets/preview'}
         if token.read_only and not search_read and request.method not in {'GET', 'HEAD', 'OPTIONS'} and not self_revoke:
             raise PermissionDenied('Этот токен разрешает только чтение.')
         now = timezone.now()

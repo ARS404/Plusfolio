@@ -1,6 +1,8 @@
 import {useEffect,useRef,useState} from 'react';
-import type {PDFDocumentProxy,PDFDocumentLoadingTask,RenderTask} from 'pdfjs-dist';
+import type {PDFDocumentProxy,PDFDocumentLoadingTask,PDFPageProxy,RenderTask} from 'pdfjs-dist';
 import {Download,FileCode2,FileText,Loader2,PackageOpen} from 'lucide-react';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import {PDF_CANVAS_MAX_SIDE,pdfViewportScale} from './pdfViewport';
 
 export type PdfDocument={title:string;pdf_url:string;tex_url?:string;project_url?:string;solutions_available?:boolean};
 function urlWith(url:string,values:Record<string,string>){const result=new URL(url,location.origin);for(const [key,value] of Object.entries(values))result.searchParams.set(key,value);return result.pathname+result.search}
@@ -14,20 +16,23 @@ export default function PdfPreview({document,allowSource=false}:{document:PdfDoc
  return <section className="pdf-preview"><div className="pdf-preview-toolbar"><label className="pdf-solutions-choice"><input type="checkbox" checked={solutions} onChange={event=>setSolutions(event.target.checked)}/>С доступными решениями</label><div><a className="btn secondary" href={urlWith(source,{download:'1'})}><Download size={15}/>Скачать PDF</a>{allowSource&&document.tex_url&&<a className="btn text" href={urlWith(document.tex_url,{solutions:solutions?'1':'0'})}><FileCode2 size={15}/>TeX</a>}{allowSource&&document.project_url&&<a className="btn text" href={urlWith(document.project_url,{solutions:solutions?'1':'0'})}><PackageOpen size={15}/>Проект ZIP</a>}</div></div>{error?<p className="error-panel" role="alert">{error}</p>:blob?<PdfCanvas key={blob} url={blob} title={document.title}/>:<div className="pdf-loading"><Loader2 className="spin" size={22}/>Собираем PDF…</div>}<p className="pdf-preview-note">В PDF попадают только решения, которые вам разрешено видеть.{allowSource&&' TeX и ZIP содержат тот же выбранный вариант.'}</p></section>
 }
 
-function PdfCanvas({url,title}:{url:string;title:string}){
+type PdfCanvasProps={url:string;title:string};
+export function PdfCanvas(props:PdfCanvasProps){return <PdfReader key={props.url} {...props}/>}
+
+function PdfReader({url,title}:PdfCanvasProps){
  const canvas=useRef<HTMLCanvasElement>(null);
  const [pdf,setPdf]=useState<PDFDocumentProxy|null>(null),[page,setPage]=useState(1),[error,setError]=useState(''),[rendering,setRendering]=useState(true);
  useEffect(()=>{let active=true,loading:PDFDocumentLoadingTask|undefined;
-  Promise.all([import('pdfjs-dist'),import('pdfjs-dist/build/pdf.worker.min.mjs?url')]).then(([library,worker])=>{
-   if(!active)return;library.GlobalWorkerOptions.workerSrc=worker.default;
+  import('pdfjs-dist').then(library=>{
+   if(!active)return;library.GlobalWorkerOptions.workerSrc=pdfWorkerUrl;
    loading=library.getDocument({url,useWasm:false,useWorkerFetch:false});
    return loading.promise.then(document=>{if(active)setPdf(document)});
   }).catch(error=>{if(active)setError(error.message||'Не удалось открыть PDF.')});
-  return()=>{active=false;void loading?.destroy()};
+  return()=>{active=false;if(loading)void loading.destroy().catch(()=>{})};
  },[url]);
- useEffect(()=>{if(!pdf||!canvas.current)return;let active=true,task:RenderTask|undefined;setRendering(true);
-  pdf.getPage(page).then(document=>{if(!active||!canvas.current)return;const viewport=document.getViewport({scale:1.5});const surface=canvas.current;surface.width=Math.ceil(viewport.width);surface.height=Math.ceil(viewport.height);task=document.render({canvas:surface,viewport});return task.promise}).then(()=>{if(active)setRendering(false)}).catch(error=>{if(active)setError(error.message||'Не удалось показать страницу.')});
-  return()=>{active=false;task?.cancel()};
+ useEffect(()=>{if(!pdf||!canvas.current)return;let active=true,task:RenderTask|undefined,document:PDFPageProxy|undefined;setRendering(true);
+  pdf.getPage(page).then(result=>{document=result;if(!active||!canvas.current){result.cleanup();return}const size=result.getViewport({scale:1});const viewport=result.getViewport({scale:pdfViewportScale(size.width,size.height)});const surface=canvas.current;surface.width=Math.max(1,Math.min(PDF_CANVAS_MAX_SIDE,Math.ceil(viewport.width)));surface.height=Math.max(1,Math.min(PDF_CANVAS_MAX_SIDE,Math.ceil(viewport.height)));task=result.render({canvas:surface,viewport});return task.promise}).then(()=>{if(active)setRendering(false)}).catch(error=>{if(active)setError(error.message||'Не удалось показать страницу.')});
+  return()=>{active=false;task?.cancel();if(task)void task.promise.then(()=>document?.cleanup(),()=>document?.cleanup());else document?.cleanup()};
  },[pdf,page]);
  if(error)return <p className="error-panel" role="alert">{error}</p>;
  return <div className="pdf-reader"><div className="pdf-page-controls"><button type="button" className="btn text" disabled={!pdf||page===1} onClick={()=>setPage(page-1)}>← Назад</button><span role="status">Страница {page}{pdf?' из '+pdf.numPages:''}</span><button type="button" className="btn text" disabled={!pdf||page===pdf.numPages} onClick={()=>setPage(page+1)}>Далее →</button></div><div className="pdf-page-surface">{rendering&&<div className="pdf-rendering"><Loader2 className="spin" size={18}/>Загружаем страницу…</div>}<canvas ref={canvas} role="img" aria-label={title+' — страница '+page} style={{visibility:rendering?'hidden':'visible'}}/></div></div>;

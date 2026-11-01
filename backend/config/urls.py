@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.http import FileResponse,HttpResponse
 from django.urls import path,re_path,include
-from core import api,tex_api
+from core import api,tex_api,image_assets
 from core.search_api import problem_search
 from core.catalogue_search_api import catalogue_search
 
@@ -20,6 +20,8 @@ urlpatterns=[
     path('healthz',ready),
     path('api/tex/toolchain',tex_api.toolchain),
     path('api/tex/toolchain/archive',tex_api.archive),
+    path('api/images',image_assets.upload),path('api/images/<uuid:pk>',image_assets.image),
+    path('api/worksheets/preview',tex_api.preview),
     path('api/problem-search',problem_search),
     path('api/catalogue-search',catalogue_search),
     path('api/v1/',include('core.api_v1')),

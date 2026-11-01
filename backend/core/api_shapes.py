@@ -1,5 +1,6 @@
 """Readable request/response contracts for the existing API; no request execution."""
 from copy import deepcopy
+from .api_contract import BLOCKS,IMAGES
 
 
 def text(description='', **extra):
@@ -66,12 +67,14 @@ PROBLEM={**MATERIAL_BASE,
  'source_url':text('Ссылка на источник.'),'attribution':record('Атрибуция источника',{
     'source':text('Код исходного источника.'),'source_id':text('Номер задачи в источнике.'),'url':text('Ссылка на исходную задачу.')},[],
     'Сведения о происхождении задачи. Пустой объект, если источник не задан.'),
+ 'statement_images':IMAGES,'solution_images':IMAGES,
  'statement':text('Условие обычным текстом.'),'statement_tex':text('TeX-фрагмент условия; пустая строка означает использование обычного текста.'),
  'source_format':text('Основной формат условия.',enum=['plain','tex']),
  'solution':text('Решение или ответ. Поле отсутствует, если аккаунту запрещено его видеть.'),
  'solution_tex':text('TeX-фрагмент решения; отсутствует вместе с закрытым решением.'),
  'solution_kind':text('Развёрнутое решение либо только ответ.',enum=['solution','answer']),
  'solved':boolean('Личная глобальная решённость. Добавляется в списке «Мои задачи».'),
+ 'worksheet_position':number('Только в журнале: исходный номер задачи внутри листка, сохраняется при скрытии разобранных.',minimum=0),
 }
 WORKSHEET={**MATERIAL_BASE,
  'document_id':text('Стабильный UUID логического листка для редактирования и публикации.',format='uuid'),'author_id':number('Числовой ID аккаунта автора, не профиля преподавателя.'),
@@ -82,6 +85,8 @@ WORKSHEET={**MATERIAL_BASE,
  'can_publish':boolean('Можно опубликовать текущую версию для всех.'),
  'has_unpublished_changes':boolean('У документа есть изменения после опубликованной версии.'),
  'template_version':text('Версия шаблона сборки PDF/TeX.'),
+ 'numbering_start':number('Первый номер задачи в листке.',enum=[0,1]),
+ 'blocks':BLOCKS,
  'problem_count':number('Количество задач.'),'problem_ids':array(UUID,'UUID задач в порядке листка.'),
 }
 ISSUE={
@@ -284,8 +289,8 @@ SCHEMAS['OpenAPI']=record('Схема OpenAPI 3.1',{
  'x-plusfolio-mandatory-instructions':record('Обязательный контракт роботов',{'policy_version':text(),'documentation_url':text(),'instructions':array(ref('MandatoryInstruction'))}),
  'externalDocs':record('Читаемый справочник',{'description':text(),'url':text()})},['openapi','info','servers','security','paths','components'])
 
-SCHEMAS['Problem']['required']=[key for key in PROBLEM if key not in {'solution','solution_tex','solution_kind','solved'}]
-SCHEMAS['Worksheet']['required']=list(WORKSHEET)
+SCHEMAS['Problem']['required']=[key for key in PROBLEM if key not in {'solution','solution_tex','solution_kind','solution_images','solved','worksheet_position'}]
+SCHEMAS['Worksheet']['required']=[key for key in WORKSHEET if key!='blocks']
 SCHEMAS['WorksheetDetail']['required']=[*WORKSHEET,'problems','solutions_available']
 SCHEMAS['Issue']['required']=list(ISSUE)
 SCHEMAS['IssueDetail']['required']=[*SCHEMAS['IssueDetail']['properties']]
@@ -320,6 +325,8 @@ SCHEMAS['TexToolchain']=record('Точный контракт локальной
     'max_open_files':number(),'linux_address_space_bytes':number(),'max_problems':number()})})
 
 RESPONSES={
+ 'imageUpload':record('Загруженный рисунок',{'id':UUID,'url':text('URL изображения с проверкой доступа.'),'width_px':number(),'height_px':number(),'size':number()}),
+ 'imageGet':{'type':'string','format':'binary'},'worksheetPreview':{'type':'string','format':'binary'},
  'catalogueSearch':ref('CatalogueSearch'),
  'texToolchain':ref('TexToolchain'),
  'problemSearch':ref('ProblemSearch'),'problemSearchText':ref('ProblemSearch'),
@@ -463,7 +470,7 @@ def request_schema_for(operation_id, schema):
     if operation_id=='accountUpdate':
         result['description']='При совмещении со student обязательны last_name, first_name, patronymic, graduation_year и no_patronymic. Для остальных — только name.'
     if operation_id=='materialCreate':
-        result['description']='kind=problem: условие и решение в тексте или TeX. kind=worksheet: непустые title и problems. Для обоих видов обязателен непустой topics.'
+        result['description']='kind=problem: условие и решение в тексте или TeX. kind=worksheet: непустой title и blocks; problems поддерживается для листков только из задач. Для обоих видов обязателен непустой topics.'
     if operation_id=='worksheetUpdate':
         result['description']='Передайте version и только изменяемые поля. Пропущенные значения сохраняются из текущей версии листка.'
     if operation_id=='invitationCreate':

@@ -167,7 +167,11 @@ class DocumentationRepresentationsTests(SimpleTestCase):
                         for field in ['paragraphs','bullets','formula','table','note']:
                             self.assertEqual(a.get(field),b.get(field))
                     self.assertEqual(right['links'],[])
-                    self.assertTrue(right['operations'])
+                    if right['id']=='storage-maintenance':
+                        self.assertEqual(right['operations'],[])
+                        self.assertIn('backend/manage.py tex_cache',json.dumps(right,ensure_ascii=False))
+                    else:
+                        self.assertTrue(right['operations'])
 
     def test_markdown_has_real_api_procedures_and_no_interface_links(self):
         catalogue=documentation_for(SimpleNamespace(roles=['teacher']),audience='robot',demo=True)
@@ -200,7 +204,7 @@ class DocumentationRepresentationsTests(SimpleTestCase):
         user=SimpleNamespace(roles=['admin'])
         operations=operations_for(user,demo=False,read_only=True)
         self.assertNotIn('demoMailbox',[op['id'] for op in operations])
-        self.assertTrue(all(op['method']=='GET' or op['id'] in {'tokenIssue','tokenRevokeCurrent','problemSearchText'} for op in operations))
+        self.assertTrue(all(op['method']=='GET' or op['id'] in {'tokenIssue','tokenRevokeCurrent','problemSearchText','worksheetPreview'} for op in operations))
 
     def test_versioned_urls_preserve_types_and_already_versioned_paths(self):
         data={'pdf_url':'/api/materials/worksheet/id/pdf?solutions=1','url':'/api/v1','statement':'/api/task-text','list':[True,12,None,'/api/v1/account'],'external':'https://example.com/api/file'}

@@ -5,16 +5,16 @@ import json
 import os
 from functools import lru_cache
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 import zipfile
 from django.conf import settings
 from .documents import TEMPLATE, CompilerUnavailable
 
 SOURCE_FILES = [
     'backend/core/__init__.py', 'backend/core/documents.py', 'backend/core/tex_worker.py',
-    'backend/core/tex_templates/math-a4-v1.tex', 'backend/core/tex_toolchain.py', 'backend/core/tex_remote.py', 'scripts/tex_service.py',
+    'backend/core/tex_templates/math-a4-v1.tex', 'backend/core/tex_templates/math-a4-v2.tex',
+    'backend/core/document_content.py', 'backend/core/content.py', 'backend/core/tex_project.py', 'backend/core/tex_cache.py', 'backend/core/tex_runtime.py', 'backend/core/tex_toolchain.py', 'backend/core/tex_remote.py', 'scripts/tex_service.py',
     'scripts/setup_tex.py', 'scripts/download_asset.py', 'scripts/preview_tex.py', 'requirements-tex.lock',
-    'docs/tex-preflight.md',
+    'docs/tex-preflight.md', 'docs/worksheet-builder.md',
 ]
 
 
@@ -58,24 +58,33 @@ def _contract(files):
             'requirements':['Python 3.12+','macOS arm64: sandbox-exec; Linux x86_64/aarch64: bubblewrap',
                             'Exact Tectonic version; complete bundled offline cache; no network for user TeX'],
             'limits':{'wall_seconds':20,'cpu_seconds':12,'max_pdf_bytes':16777216,
-                      'max_open_files':256,'linux_address_space_bytes':1073741824,'max_problems':300}}
+                      'max_blocks':300,'max_image_bytes':4194304,'max_workspace_bytes':67108864,'max_workspace_entries':2048,'max_open_files':256,'linux_address_space_bytes':1073741824,'max_problems':300}}
 
 
 def build_contract(root=None, cache_root=None):
     return _contract(toolchain_files(root,cache_root))
 
 
-def toolchain_archive():
-    files=toolchain_files()
-    contract=_contract(files)
-    directory=settings.LOCAL_DIR/'tex-toolchains';directory.mkdir(mode=0o700,exist_ok=True)
-    target=directory/(contract['contract_id']+'.zip')
-    if not target.exists():
-        with NamedTemporaryFile(dir=directory,suffix='.zip',delete=False) as temp:name=temp.name
-        try:
-            with zipfile.ZipFile(name,'w',zipfile.ZIP_DEFLATED) as archive:
-                for relative,path in files.items():archive.write(path,relative)
-                archive.writestr('toolchain-manifest.json',json.dumps(contract,ensure_ascii=False,indent=2))
-            os.chmod(name,0o600);os.replace(name,target)
-        finally:Path(name).unlink(missing_ok=True)
-    return target
+def toolchain_archive(*,open_file=False):
+    from .tex_cache import toolchain_cache
+    from uuid import uuid4
+    cache=toolchain_cache()
+    if not cache.max_entries or not cache.max_age or not cache.max_bytes:
+        raise CompilerUnavailable('Архив TeX недоступен: хранение пакета отключено настройками кэша.')
+    files=toolchain_files();contract=_contract(files)
+    with cache.locked():
+        cache._prune()
+        target=cache.directory/(contract['contract_id']+'.zip')
+        if target.is_symlink():raise CompilerUnavailable('Некорректный файл кэша TeX.')
+        if not target.exists():
+            temporary=cache.directory/(contract['contract_id']+'.'+uuid4().hex+'.tmp')
+            try:
+                with zipfile.ZipFile(temporary,'w',zipfile.ZIP_DEFLATED) as archive:
+                    for relative,path in files.items():archive.write(path,relative)
+                    archive.writestr('toolchain-manifest.json',json.dumps(contract,ensure_ascii=False,indent=2))
+                if temporary.stat().st_size>cache.max_bytes:raise CompilerUnavailable('Архив TeX превышает настроенный лимит кэша.')
+                temporary.chmod(0o600);os.replace(temporary,target)
+            finally:temporary.unlink(missing_ok=True)
+        os.utime(target,None);cache._prune()
+        # Open while still locked: a newer contract can evict this path immediately afterwards.
+        return target.open('rb') if open_file else target

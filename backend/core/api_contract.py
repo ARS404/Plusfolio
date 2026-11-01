@@ -29,17 +29,25 @@ TAG = query('tag', 'Числовой ID тега соответствующег�
 TOPIC = query('topic', 'UUID темы. Включает все дочерние темы.', multiple=True, schema=UUID)
 CITY = query('city', 'Точное название города. Повторите параметр для нескольких городов.', multiple=True)
 ISSUES = query('issues', 'all либо числовые ID выдач через запятую. Например: 12,19.')
+JOURNAL_VIEW = [query('hide_discussed','1 — скрыть задачи, разобранные в этом кружке. Пустые после фильтра блоки скрываются; исходные номера задач сохраняются.',schema={'enum':['0','1'],'default':'0'}),
+                query('order','Порядок листков по дате выдачи; при одинаковой дате — по ID выдачи.',schema={'enum':['newest','oldest'],'default':'newest'})]
 SOURCE = [query('solutions', '1 — включить только разрешённые решения.', schema={'enum': ['0', '1']}),
           query('download', '1 — скачать PDF вложением.', schema={'enum': ['0', '1']})]
 TOKEN_BODY = obj({'login': {'type': 'string', 'format': 'email'}, 'password': {'type': 'string', 'writeOnly': True},
                   'name': {'type': 'string', 'minLength': 1, 'maxLength': 100},
                   'expires_in_days': {'type': 'integer', 'minimum': 1, 'maximum': 90, 'default': 30},
                   'read_only': {'type': 'boolean', 'default': False}}, ['login', 'password'])
+IMAGES={'type':'array','maxItems':20,'items':obj({'id':UUID,'width':{'type':'integer','minimum':10,'maximum':100},
+        'align':{'type':'string','enum':['left','center','right']},'caption':{'type':'string','maxLength':500}},['id'])}
+BLOCKS={'type':'array','minItems':1,'maxItems':300,'items':{'oneOf':[
+    obj({'kind':{'const':'problem'},'problem_id':UUID,'include_in_journal':{'type':'boolean','default':True,'description':'Учитывать задачу в плюснике и прогрессе; содержимое листка и PDF сохраняется.'}},['kind','problem_id']),
+    obj({'kind':{'const':'text'},'style':{'enum':['plain','heading','definition','theorem','lemma','example','remark']},
+         'title':STRING,'text':STRING,'tex':STRING,'images':IMAGES},['kind'])]}}
 MATERIAL = obj({'title': STRING, 'description': STRING, 'statement': STRING, 'solution': STRING,
                 'statement_tex': STRING, 'solution_tex': STRING, 'topics': ARRAY_UUID, 'tags': ARRAY_INT,
-                'problems': ARRAY_UUID}, ['topics'])
+                'problems': ARRAY_UUID,'blocks':BLOCKS,'numbering_start':{'type':'integer','enum':[0,1],'default':1},'statement_images':IMAGES,'solution_images':IMAGES}, ['topics'])
 WORKSHEET_EDIT = obj({'version': INT, 'title': STRING, 'description': STRING,
-                      'topics': ARRAY_UUID, 'tags': ARRAY_INT, 'problems': ARRAY_UUID}, ['version'])
+                      'topics': ARRAY_UUID, 'tags': ARRAY_INT, 'problems': ARRAY_UUID,'blocks':BLOCKS,'numbering_start':{'type':'integer','enum':[0,1],'default':1}}, ['version'])
 MARK = obj({'value': BOOL, 'version': {'type': 'integer', 'minimum': 0}, 'student_id': INT}, ['value', 'version'])
 
 
@@ -50,6 +58,9 @@ def operation(id, summary, access='all', *, body=None, example=None, parameters=
 
 # Django converters and view argument names are part of the same registry as the schema.
 ROUTES = [
+ ('images','image_assets.upload',{'POST':operation('imageUpload','Загрузить неизменяемый PNG/JPEG','all',body=obj({'data':{'type':'string','contentEncoding':'base64','maxLength':2796218}},['data']),status=201,description='PNG/JPEG до 2 МиБ и 16 мегапикселей. Возвращает id для images и команды \\pfimage{id}. Поддерживается также multipart file. До 50 МиБ на аккаунт; сохранённые редакции сохраняют рисунки.')}),
+ ('images/<uuid:pk>','image_assets.image',{'GET':operation('imageGet','Прочитать доступный рисунок',binary=True,parameters=[query('circle','Контекст доступа к решению.',schema=UUID)],description='Доступ определяется условием, решением или текстовым блоком, где используется рисунок. Закрытые решения не раскрываются по прямому URL.')}),
+ ('worksheets/preview','tex_api.preview',{'POST':operation('worksheetPreview','Собрать PDF черновика без сохранения',body=obj({'title':STRING,'description':STRING,'blocks':BLOCKS,'numbering_start':{'type':'integer','enum':[0,1],'default':1},'solutions':BOOL},['blocks']),binary=True,description='Ничего не создаёт и не сохраняет PDF в кэш. До 12 сборок в минуту. Включает только доступные решения.')}),
  ('tex/toolchain', 'tex_api.toolchain', {'GET': operation('texToolchain','Получить точный контракт сборки TeX', 'writer',description='До загрузки робот MUST получить contract_id, скачать архив сборки, повторить сборку и согласовать PDF по инструкции robot-tex-build. Операция только читает и доступна токену read_only. Без записей задач или листков.')}),
  ('tex/toolchain/archive', 'tex_api.archive', {'GET': operation('texToolchainArchive','Скачать сборщик, шаблон и подготовленные ресурсы TeX', 'writer',binary=True,description='ZIP содержит точные исходники сборщика сервиса, Tectonic installer с закреплёнными хешами, шаблон, offline-кэш и toolchain-manifest.json. Проверить contract_id и хеши, не использовать другую TeX-сборку. Доступно токену read_only.')}),
  ('catalogue-search','catalogue_search_api.catalogue_search',{'GET':operation('catalogueSearch','Поиск названий и описаний по тексту и смыслу',parameters=CATALOGUE_PARAMETERS,description=CATALOGUE_DESCRIPTION)}),
@@ -99,9 +110,9 @@ ROUTES = [
         example={'worksheet_ids':['<REVISION_UUID>'],'issued_on':'2026-10-26'}, description='Массив UUID версий, не document_id. Дата не в будущем. Набор сохраняется атомарно. Ответ — обновлённый список выдач.')}),
  ('circles/<uuid:pk>/issues/<int:issue_id>', 'api.issue_detail', {'GET': operation('issueGet', 'Получить фиксированную выданную версию листка')}),
  ('circles/<uuid:pk>/issues/<int:issue_id>/<str:file_kind>', 'api.issue_document', {'GET': operation('issueFile', 'PDF/TeX/ZIP конкретной выдачи', parameters=SOURCE, binary=True)}),
- ('circles/<uuid:pk>/journal', 'api.journal', {'GET': operation('journalGet', 'Журнал, блоки задач и версии отметок', parameters=[ISSUES,Q])}),
- ('circles/<uuid:pk>/journal/export', 'api.journal_export', {'GET': operation('journalExport', 'Выгрузить текущий срез журнала', parameters=[ISSUES,Q,query('file_format','Формат файла.',schema={'enum':['xlsx','tsv'],'default':'xlsx'})], binary=True)}),
- ('circles/<uuid:pk>/journal/<int:issue_id>', 'api.journal', {'GET': operation('journalIssueGet', 'Журнал одного выданного листка')}),
+ ('circles/<uuid:pk>/journal', 'api.journal', {'GET': operation('journalGet', 'Журнал, блоки задач и версии отметок', parameters=[ISSUES,Q,*JOURNAL_VIEW])}),
+ ('circles/<uuid:pk>/journal/export', 'api.journal_export', {'GET': operation('journalExport', 'Выгрузить текущий срез журнала', parameters=[ISSUES,Q,*JOURNAL_VIEW,query('file_format','Формат файла.',schema={'enum':['xlsx','tsv'],'default':'xlsx'})], binary=True)}),
+ ('circles/<uuid:pk>/journal/<int:issue_id>', 'api.journal', {'GET': operation('journalIssueGet', 'Журнал одного выданного листка',parameters=JOURNAL_VIEW)}),
  ('circles/<uuid:pk>/problems/<uuid:problem_id>/<str:kind>', 'api.mark', {'POST': operation('journalMark', 'Изменить решение, разбор или показ решения', 'writer', body=MARK,
     example={'student_id':12,'value':True,'version':0}, description='kind: solve, discussion или solution-visibility. student_id обязателен только для solve. version возьмите из журнала (0, если записи нет). 409 требует перечитать состояние.')}),
  ('circles/<uuid:pk>/audit', 'api.audit', {'GET': operation('circleAudit', 'История изменений доступного кружка', 'group')}),
@@ -109,7 +120,7 @@ ROUTES = [
     'GET': operation('materialList', 'Доступные задачи или версии листков', parameters=[Q,TAG,TOPIC,query('scope','Для листков.',schema={'enum':['available','public','mine','all']}),query('pagination','1 — постраничный ответ банка задач.',schema={'enum':['1']}),query('page','Страница банка задач.',schema=INT),query('page_size','Размер страницы банка задач: 1–100.',schema=INT)]),
     'POST': operation('materialCreate', 'Создать неизменяемую задачу или личный листок', 'writer', body=MATERIAL,
         example={'title':'Листок по алгебре','topics':['<TOPIC_UUID>'],'tags':[],'problems':['<PROBLEM_UUID>']},status=201,
-        description='kind: problem или worksheet. Для задачи нужны условие и решение текстом или TeX; название необязательно. Для листка нужны название и непустой массив problems без повторов. topics непустой для обоих видов. При загрузке листка робот MUST сначала прочитать /api/v1/documentation/robot-worksheet-upload?audience=robot и соблюдать дополнительные вопросы, выбор аналогов и подтверждение метаданных.')}),
+        description='kind: problem или worksheet. Условия и решения поддерживают текст, TeX, TikZ и images. Для листка нужны title и blocks (текст/задачи); прежний problems принимается для листков только из задач. topics непустой. Робот MUST соблюдать /api/v1/documentation/robot-worksheet-upload?audience=robot.')}),
  ('materials/<str:kind>/<uuid:pk>', 'api.material_detail', {'GET': operation('materialGet', 'Условие и разрешённые решения материала', parameters=[query('circle','UUID кружка для контекстного показа решений.',schema=UUID)])}),
  ('materials/<str:kind>/<uuid:pk>/<str:file_kind>', 'api.material_document', {'GET': operation('materialFile', 'Скачать PDF/TeX/ZIP доступного материала', parameters=SOURCE+[query('circle','UUID контекста кружка.',schema=UUID)], binary=True)}),
  ('worksheet-documents/<uuid:pk>', 'api.worksheet_document', {
@@ -185,7 +196,7 @@ def operations_for(user, *, demo=False, read_only=False):
                 continue
             if not permitted(user, spec['access']) or spec['id'] == 'demoMailbox' and not demo:
                 continue
-            if read_only and method not in {'GET','HEAD','OPTIONS'} and spec['id'] not in {'tokenIssue','tokenRevokeCurrent','problemSearchText'}:
+            if read_only and method not in {'GET','HEAD','OPTIONS'} and spec['id'] not in {'tokenIssue','tokenRevokeCurrent','problemSearchText','worksheetPreview'}:
                 continue
             parameters = []
             for converter, name in re.findall(r'<(\w+):(\w+)>', pattern):

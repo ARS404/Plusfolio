@@ -1,0 +1,341 @@
+{
+  "date": "2026-11-01",
+  "scope": "Local macOS synthetic microbenchmarks, not production load or end-to-end request/PDF latency. Before = uncommitted local source at audit start, after = two optimization passes plus independent cross-review.",
+  "backend": [
+    {
+      "files": [
+        "backend/core/image_assets.py",
+        "backend/core/services.py",
+        "backend/core/tex_api.py"
+      ],
+      "finding": "Attachment validation performed per-image and per-block permission queries.",
+      "result": "One lazy permission-scoped query for the requested set, metadata only; worksheet/problem/draft validates attachments once.",
+      "before_queries_for_8_foreign_statement_images": 9,
+      "after_queries": 1
+    },
+    {
+      "files": [
+        "backend/core/image_assets.py",
+        "backend/core/test_blocks.py"
+      ],
+      "finding": "Unconditional EXIF transpose and same-mode conversion created two full pixel copies; embedded color profiles were retained.",
+      "result": "In-place EXIF orientation, reuse compatible pixel buffers, deterministic close of converted image, clear metadata before PNG encoding.",
+      "before": {
+        "platform": "darwin",
+        "dimensions": [
+          3000,
+          3000
+        ],
+        "png_bytes": 33248,
+        "process_peak_rss_bytes": 191086592,
+        "normalization_seconds": 0.048204
+      },
+      "after": {
+        "platform": "darwin",
+        "dimensions": [
+          3000,
+          3000
+        ],
+        "png_bytes": 33248,
+        "process_peak_rss_bytes": 119570432,
+        "normalization_seconds": 0.041828
+      },
+      "limits": "Fresh macOS process with 3000×3000 solid RGB PNG; RSS includes interpreter, Django and fixture generation. Wall time is recorded only, not claimed as speedup."
+    },
+    {
+      "files": [
+        "backend/core/journal.py"
+      ],
+      "finding": "A second shallow copy of every task dictionary was retained by apply_view.",
+      "result": "Reuse numbered task dictionaries; keep independent block/list view and legacy numbering fallback.",
+      "before": {
+        "worksheets": 20,
+        "task_appearances": 2000,
+        "peak_temporary_python_bytes": 1698560,
+        "retained_python_bytes": 1688184,
+        "preserved_zero": true
+      },
+      "after": {
+        "worksheets": 20,
+        "task_appearances": 2000,
+        "peak_temporary_python_bytes": 34560,
+        "retained_python_bytes": 24184,
+        "preserved_zero": true
+      },
+      "limits": "tracemalloc observes Python allocation during only apply_view; input construction excluded; 20 worksheets ×100 task appearances."
+    },
+    {
+      "files": [
+        "backend/core/journal.py",
+        "backend/core/api.py"
+      ],
+      "finding": "Journal prefetch loaded full task bodies even for include_in_journal=false.",
+      "result": "Preserve all item ranks, prefetch Problem data only for included items, serialize in one pass; solution scope ignores excluded IDs.",
+      "before": {
+        "item_positions": 9,
+        "included_items": 1,
+        "loaded_problem_objects": 9,
+        "queries": 5,
+        "peak_python_bytes": 4396016,
+        "retained_python_bytes": 4384593,
+        "excluded_text_bytes": 4194304
+      },
+      "after": {
+        "item_positions": 9,
+        "included_items": 1,
+        "loaded_problem_objects": 1,
+        "queries": 5,
+        "peak_python_bytes": 144467,
+        "retained_python_bytes": 132049,
+        "excluded_text_bytes": 4194304
+      },
+      "limits": "Fresh disposable SQLite test DB: one included short task plus eight excluded tasks, each 256 KiB statement and solution; SQL count remains five."
+    }
+  ],
+  "frontend": {
+    "environment": {
+      "node": "v26.3.1",
+      "platform": "darwin",
+      "arch": "arm64"
+    },
+    "scope": "Pure helper microbenchmark, not a full browser or server benchmark",
+    "fixture": {
+      "worksheets": 40,
+      "task_occurrences": 3200,
+      "unique_tasks": 80,
+      "students": 100,
+      "solve_states": 8000
+    },
+    "journal_view": {
+      "before_ms_per_call": 0.043968165999999996,
+      "after_ms_per_call": 0.0059464159999999995,
+      "before_cloned_task_objects": 3200,
+      "after_cloned_task_objects": 0
+    },
+    "totals": {
+      "before_ms_per_call": 0.14656665999999974,
+      "after_ms_per_call": 0.1006266699999992
+    },
+    "builder_search_cache": {
+      "search_results_across_queries": 2000,
+      "selected_tasks": 10,
+      "before_known_entries": 2000,
+      "after_known_entries": 10,
+      "current_choices": 40,
+      "before_known_serialized_bytes": 14366451,
+      "after_known_and_choices_serialized_bytes": 79173,
+      "note": "Serialized retained record envelope, not a JS heap/RSS measurement"
+    },
+    "draft_serialization": {
+      "draft_json_bytes": 2096270,
+      "before_calls_per_100_unrelated_renders": 100,
+      "after_calls_per_100_unrelated_renders": 0,
+      "before_100_stringifications_ms": 173.18570799999998,
+      "note": "After: stringify only when explicitly requesting preview or saving; stale state retains a Symbol, not serialized draft text"
+    }
+  },
+  "tex": {
+    "environment": {
+      "python": "3.14.2",
+      "platform": "darwin"
+    },
+    "limits": "Synthetic local filesystem microbenchmarks during parallel work, not end-to-end TeX or production load results.",
+    "workspace_scan": {
+      "files": 2000,
+      "directories": 5,
+      "before": {
+        "peak_python_bytes": 763050,
+        "median_wall_ms": 21.169,
+        "samples": 7
+      },
+      "after": {
+        "peak_python_bytes": 3111,
+        "median_wall_ms": 6.529,
+        "samples": 7
+      }
+    },
+    "compiler_install": {
+      "compiler_bytes": 4194304,
+      "archive_bytes": 4195769,
+      "before": {
+        "peak_python_bytes": 13024823,
+        "median_wall_ms": 3.531,
+        "samples": 7
+      },
+      "after": {
+        "peak_python_bytes": 1754995,
+        "median_wall_ms": 3.43,
+        "samples": 7
+      }
+    },
+    "deterministic_work_reduction": {
+      "render_project_json_serializations": {
+        "before": 2,
+        "after": 1
+      },
+      "uncached_pdf_fingerprints": {
+        "before": 1,
+        "after": 0
+      },
+      "isolated_compiler_project_decodes": {
+        "before": 2,
+        "after": 1
+      },
+      "warm_setup_template_compilations": {
+        "before": 3,
+        "after": 2
+      }
+    }
+  },
+  "tex_edge_cases": {
+    "archive_zero_limits": [
+      {
+        "max_files": 0,
+        "max_age": 86400,
+        "outcome": "CompilerUnavailable"
+      },
+      {
+        "max_files": 2,
+        "max_age": 0,
+        "outcome": "CompilerUnavailable"
+      }
+    ],
+    "workspace_deep_tree": {
+      "depth": 64,
+      "peak_scandir_handles": 1,
+      "handles_after_return": 0,
+      "usage": {
+        "bytes": 0,
+        "entries": 64
+      }
+    }
+  },
+  "disk_cleanup": {
+    "scope": "Obsolete local-preview frontend build and Vite cache only",
+    "removed": [
+      {
+        "path": "frontend/dist",
+        "bytes": 3579625,
+        "files": 71
+      },
+      {
+        "path": "frontend/.vite-cache",
+        "bytes": 10932774,
+        "files": 18
+      }
+    ],
+    "freed_bytes": 14512399,
+    "preserved": [
+      "source files",
+      "runtime databases",
+      "backups",
+      "trusted TeX resources",
+      "shared backend bytecode through backend symlink"
+    ]
+  },
+  "verification": {
+    "backend": {
+      "discovered": 352,
+      "passed": 348,
+      "skipped": 4,
+      "failed": 0,
+      "skip_reason": "PostgreSQL-specific row locks and search projection/trigram tests; local suite uses SQLite",
+      "seconds": 207.416
+    },
+    "frontend": {
+      "passed": 34,
+      "failed": 0
+    },
+    "deployment_helpers": {
+      "passed": 32,
+      "failed": 0
+    },
+    "production_build": {
+      "status": "passed",
+      "typecheck": "passed",
+      "note": "Existing >500 kB application chunk warning remains; no claim of production load-test coverage."
+    },
+    "migration_check": "No changes detected",
+    "release": "1.0.1 unchanged",
+    "git": "No commit or push; HEAD remains 4d211d37163bbedfe4261cb4607a3b21af7d0e27",
+    "real_tectonic": {
+      "compiler_exit": 0,
+      "resources_unchanged": true,
+      "pdf_cache_unchanged": true,
+      "preview_jobs_remaining": 0,
+      "pdf_bytes": {
+        "with-solutions.pdf": 35077,
+        "statement.pdf": 33787
+      }
+    },
+    "browser": [
+      "Constructor guide for teacher and maintenance guide for admin visibly checked",
+      "PDF page 2 of 2 replaced by page 1 of 1; stale draft indicator checked",
+      "Canvas ordinary A4: 893×1263 pixels; oversized page limit covered by helper tests",
+      "Task picker search P-2, insert, delete, reopen; cancelled draft without saving",
+      "Journal hidden discussed reduces unique tasks 8→5; oldest/newest order and aggregate checked; preferences restored",
+      "Student self row class current-user-row and own total 4 of 8; other student totals absent",
+      "Browser console: no errors in final session"
+    ],
+    "cache_checks": {
+      "main": {
+        "pdf": {
+          "files": 30,
+          "bytes": 1152023,
+          "removed": 0,
+          "max_bytes": 134217728,
+          "max_files": 256,
+          "max_age_seconds": 604800
+        },
+        "toolchains": {
+          "files": 2,
+          "bytes": 26798226,
+          "removed": 0,
+          "max_bytes": 134217728,
+          "max_files": 2,
+          "max_age_seconds": 1209600
+        },
+        "abandoned_jobs": {
+          "removed": 0
+        },
+        "abandoned_previews": {
+          "removed": 0
+        },
+        "trusted_resources": {
+          "files": 465,
+          "bytes": 49249496,
+          "policy": "read-only during document compilation; never evicted"
+        }
+      },
+      "preview": {
+        "pdf": {
+          "files": 0,
+          "bytes": 0,
+          "removed": 0,
+          "max_bytes": 134217728,
+          "max_files": 256,
+          "max_age_seconds": 604800
+        },
+        "toolchains": {
+          "files": 0,
+          "bytes": 0,
+          "removed": 0,
+          "max_bytes": 134217728,
+          "max_files": 2,
+          "max_age_seconds": 1209600
+        },
+        "abandoned_jobs": {
+          "removed": 0
+        },
+        "abandoned_previews": {
+          "removed": 0
+        },
+        "trusted_resources": {
+          "files": 465,
+          "bytes": 49249496,
+          "policy": "read-only during document compilation; never evicted"
+        }
+      }
+    }
+  }
+}

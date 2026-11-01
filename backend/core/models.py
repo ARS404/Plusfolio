@@ -177,6 +177,10 @@ class Problem(PublishedMaterial):
     solution=models.TextField()
     statement_tex=models.TextField(blank=True,default='')
     solution_tex=models.TextField(blank=True,default='')
+    statement_images=models.JSONField(default=list,blank=True)
+    solution_images=models.JSONField(default=list,blank=True)
+    statement_assets=models.ManyToManyField('ImageAsset',blank=True,related_name='statement_problems')
+    solution_assets=models.ManyToManyField('ImageAsset',blank=True,related_name='solution_problems')
     topics=models.ManyToManyField(Topic,related_name='problems')
     tags=models.ManyToManyField(Tag,related_name='problems',blank=True)
     @property
@@ -239,10 +243,11 @@ class CatalogueSearchDocument(models.Model):
 class Worksheet(PublishedMaterial):
     class Meta:
         indexes=[models.Index(fields=['-created_at','-id'],condition=models.Q(published=True),name='worksheet_published_order')]
-        constraints=[models.UniqueConstraint(fields=['document','revision'],name='unique_worksheet_revision')]
+        constraints=[models.UniqueConstraint(fields=['document','revision'],name='unique_worksheet_revision'),models.CheckConstraint(condition=models.Q(numbering_start__in=[0,1]),name='worksheet_numbering_start_0_or_1')]
     document=models.ForeignKey(WorksheetDocument,on_delete=models.PROTECT,related_name='revisions')
     revision=models.PositiveIntegerField(default=1)
-    template_version=models.CharField(max_length=40,default='math-a4-v1')
+    template_version=models.CharField(max_length=40,default='math-a4-v2')
+    numbering_start=models.PositiveSmallIntegerField(default=1)
     topics=models.ManyToManyField(Topic,related_name='worksheets')
     tags=models.ManyToManyField(Tag,related_name='worksheets',blank=True)
 
@@ -250,11 +255,52 @@ class WorksheetItem(models.Model):
     worksheet=models.ForeignKey(Worksheet,on_delete=models.PROTECT,related_name='items')
     problem=models.ForeignKey(Problem,on_delete=models.PROTECT,related_name='items')
     position=models.PositiveIntegerField()
+    include_in_journal=models.BooleanField(default=True)
     class Meta:
         ordering=['position']
         constraints=[models.UniqueConstraint(fields=['worksheet','problem'],name='one_problem_in_worksheet'),models.UniqueConstraint(fields=['worksheet','position'],name='one_position')]
     def save(self,*args,**kwargs):
         if self.worksheet.published: raise ValidationError('Состав опубликованного листка неизменяем.')
+        super().save(*args,**kwargs)
+
+
+class ImageAsset(models.Model):
+    """Immutable, normalized images. Stored with the database and its backups."""
+    id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
+    owner=models.ForeignKey(User,on_delete=models.PROTECT,related_name='image_assets')
+    digest=models.CharField(max_length=64)
+    media_type=models.CharField(max_length=20)
+    width=models.PositiveIntegerField()
+    height=models.PositiveIntegerField()
+    size=models.PositiveIntegerField()
+    data=models.BinaryField()
+    created_at=models.DateTimeField(auto_now_add=True,db_index=True)
+    class Meta:
+        constraints=[models.UniqueConstraint(fields=['owner','digest'],name='unique_owner_image')]
+    def save(self,*args,**kwargs):
+        if not self._state.adding:raise ValidationError('Загруженное изображение неизменяемо. Загрузите новый файл.')
+        super().save(*args,**kwargs)
+
+
+class WorksheetBlock(models.Model):
+    """Revision-local ordered content; WorksheetItem remains the task projection."""
+    worksheet=models.ForeignKey(Worksheet,on_delete=models.PROTECT,related_name='blocks')
+    position=models.PositiveIntegerField()
+    kind=models.CharField(max_length=12,choices=[('problem','Задача'),('text','Текст')])
+    include_in_journal=models.BooleanField(default=True)
+    problem=models.ForeignKey(Problem,null=True,blank=True,on_delete=models.PROTECT,related_name='worksheet_blocks')
+    style=models.CharField(max_length=16,default='plain')
+    title=models.CharField(max_length=180,blank=True,default='')
+    text=models.TextField(blank=True,default='')
+    tex=models.TextField(blank=True,default='')
+    images=models.JSONField(default=list,blank=True)
+    assets=models.ManyToManyField(ImageAsset,blank=True,related_name='text_blocks')
+    class Meta:
+        ordering=['position']
+        constraints=[models.UniqueConstraint(fields=['worksheet','position'],name='unique_block_position'),
+                     models.CheckConstraint(condition=models.Q(kind='text',problem__isnull=True)|models.Q(kind='problem',problem__isnull=False),name='block_kind_matches_problem')]
+    def save(self,*args,**kwargs):
+        if not self._state.adding:raise ValidationError('Сохранённый блок неизменяем. Сохраните новую редакцию листка.')
         super().save(*args,**kwargs)
 
 class WorksheetIssue(models.Model):
@@ -369,3 +415,21 @@ class ApiToken(models.Model):
     expires_at=models.DateTimeField(db_index=True)
     revoked_at=models.DateTimeField(null=True)
     last_used_at=models.DateTimeField(null=True)
+
+
+@receiver(m2m_changed)
+def protect_image_links(sender,instance,action,reverse,pk_set,**kwargs):
+    if not action.startswith('pre_'):return
+    if sender in {Problem.statement_assets.through,Problem.solution_assets.through}:
+        if isinstance(instance,Problem) and instance.published:raise ValidationError('Рисунки сохранённой задачи неизменяемы.')
+        if reverse:
+            field='statement_problems' if sender==Problem.statement_assets.through else 'solution_problems'
+            rows=getattr(instance,field).all()
+            if pk_set is not None:rows=rows.filter(pk__in=pk_set)
+            if rows.filter(published=True).exists():raise ValidationError('Рисунки сохранённой задачи неизменяемы.')
+    if sender==WorksheetBlock.assets.through:
+        if isinstance(instance,WorksheetBlock) and instance.worksheet.published:raise ValidationError('Рисунки сохранённого блока неизменяемы.')
+        if reverse:
+            rows=instance.text_blocks.all()
+            if pk_set is not None:rows=rows.filter(pk__in=pk_set)
+            if rows.filter(worksheet__published=True).exists():raise ValidationError('Рисунки сохранённого блока неизменяемы.')

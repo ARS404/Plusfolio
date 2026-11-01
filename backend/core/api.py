@@ -187,15 +187,17 @@ def material_data(material,user,detail=False,circle=None,allowed_solutions=None)
         if circle:
             for key in ['pdf_url','tex_url','project_url']:result[key]+='?circle='+str(circle.pk)
         result['source_format']='tex' if material.statement_tex else 'plain';result['statement_tex']=material.statement_tex
+        result['statement_images']=material.statement_images
         show_solution=material.pk in allowed_solutions if allowed_solutions is not None else s.solution_allowed(user,material,circle)
         if show_solution:
             result['solution']=material.solution;result['solution_tex']=material.solution_tex
+            result['solution_images']=material.solution_images
             result['solution_kind']='answer' if material.source=='problems.ru' and not material.source_metadata.get('has_detailed_solution',False) else 'solution'
     else:
         from .documents import references
         from .worksheets import metadata
         result.update(metadata(material,user))
-        result.update(references('/api/materials/worksheet/'+str(material.pk),material.title));result['template_version']=material.template_version
+        result.update(references('/api/materials/worksheet/'+str(material.pk),material.title));result['template_version']=material.template_version;result['numbering_start']=material.numbering_start
         if detail:
             problems=[i.problem for i in material.items.select_related('problem__author').prefetch_related('problem__topics','problem__tags')]
             problem_ids=[p.pk for p in problems]
@@ -203,6 +205,8 @@ def material_data(material,user,detail=False,circle=None,allowed_solutions=None)
         result['problem_count']=len(problem_ids)
         result['problem_ids']=[str(pk) for pk in problem_ids]
         if detail:
+            from .content import serialize_blocks
+            result['blocks']=serialize_blocks(material)
             visible=s.visible_solution_ids(user,problem_ids,circle) if allowed_solutions is None else allowed_solutions
             result['problems']=[material_data(p,user,circle=circle,allowed_solutions=visible) for p in problems]
             result['solutions_available']=bool(visible)
@@ -250,12 +254,14 @@ def personal_issue(user,pk):
 @api_view(['GET'])
 def issue_detail(request,pk,issue_id):
     circle=s.get_circle(request.user,pk);issue=circle.issues.select_related('worksheet__document','worksheet__author','circle').prefetch_related('worksheet__tags').get(pk=issue_id)
-    return Response({**material_data(issue.worksheet,request.user,True,circle),**issue_data(issue)})
+    payload=material_data(issue.worksheet,request.user,True,circle);issue._problem_count=payload['problem_count']
+    return Response({**payload,**issue_data(issue)})
 
 @api_view(['GET'])
 def my_issue_detail(request,issue_id):
     issue=personal_issue(request.user,issue_id)
-    return Response({**material_data(issue.worksheet,request.user,True),**issue_data(issue,True)})
+    payload=material_data(issue.worksheet,request.user,True);issue._problem_count=payload['problem_count']
+    return Response({**payload,**issue_data(issue,True)})
 
 def document_response(request,material,kind,issue=None,personal=False,circle=None):
     from .documents import project_for,response
@@ -344,25 +350,29 @@ def worksheet_publish(request,pk):
 
 @api_view(['GET'])
 def journal(request,pk,issue_id=None):
-    from .journal import select_issues, snapshot
+    from .journal import select_issues, snapshot, apply_view, view_options
     circle=s.get_circle(request.user,pk)
+    options=view_options(request.query_params)
     selected=select_issues(circle,str(issue_id) if issue_id is not None else request.query_params.get('issues','all'))
-    problem_ids={item.problem_id for issue in selected for item in issue.worksheet.items.all()}
+    problem_ids={item.problem_id for issue in selected for item in issue.worksheet.items.all() if item.include_in_journal}
     visible=s.visible_solution_ids(request.user,problem_ids,circle)
     result=snapshot(request.user,circle,selected,lambda problem,user:material_data(problem,user,circle=circle,allowed_solutions=visible),request.query_params.get('q',''))
+    original=result['blocks'][0] if issue_id is not None else None
+    result=apply_view(result,**options)
     if issue_id is not None:
         # Preserve the original one-worksheet API for existing clients.
-        result.update(result['blocks'][0])
+        result.update(result['blocks'][0] if result['blocks'] else {**original,'problems':[]})
     return Response(result)
 
 @api_view(['GET'])
 def journal_export(request,pk):
-    from .journal import select_issues, snapshot
+    from .journal import select_issues, snapshot, apply_view, view_options
     from .journal_export import export
     circle=s.get_circle(request.user,pk)
+    options=view_options(request.query_params)
     selected=select_issues(circle,request.query_params.get('issues','all'),for_export=True)
     data=snapshot(request.user,circle,selected,lambda problem,user:{'id':str(problem.pk),'title':problem.display_title},request.query_params.get('q',''))
-    return export(data,request.query_params.get('file_format','xlsx'))
+    return export(apply_view(data,**options),request.query_params.get('file_format','xlsx'))
 
 @api_view(['POST'])
 def mark(request,pk,problem_id,kind):

@@ -14,6 +14,8 @@ def schema_for(user, *, demo=False, read_only=False):
         binary = item['binary']
         media = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','text/tab-separated-values'] if item['id']=='journalExport' else ['application/pdf'] + (['application/x-tex','application/zip'] if set(user.roles)&{'teacher','admin'} else [])
         if item['id']=='texToolchainArchive':media=['application/zip']
+        if item['id']=='imageGet':media=['image/png']
+        if item['id']=='worksheetPreview':media=['application/pdf']
         content = {kind: {'schema':{'type':'string','format':'binary'}} for kind in media} if binary else {'application/json':{'schema':response_schema_for(item['id'])}}
         if item['id'] in {'documentationGet','documentationSection'}:
             content['text/markdown']={'schema':{'type':'string','description':'Markdown-файл руководства при download=markdown.'}}

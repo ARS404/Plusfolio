@@ -17,9 +17,8 @@ fi
 (cd frontend && npm run build)
 .venv/bin/python backend/manage.py migrate --noinput
 .venv/bin/python backend/manage.py seed_demo
-if [[ ! -x .local/tools/tectonic || ! -d .local/tectonic-cache ]]; then
-  .venv/bin/python scripts/setup_tex.py
-fi
+# Check the current trusted templates too: an existing v1 cache may lack v2 packages.
+.venv/bin/python scripts/setup_tex.py
 printf '\nPlusfolio: http://127.0.0.1:8000\nОстановка: Ctrl+C. Изменения сохраняются в .local/demo.sqlite3.\n\n'
 if [[ "${PLUSFOLIO_SEARCH:-1}" == 1 ]]; then
   scripts/run_search.sh &

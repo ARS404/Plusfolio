@@ -34,6 +34,8 @@ LANGUAGE_CODE='ru-ru'
 TIME_ZONE='Europe/Moscow'
 USE_TZ=True
 DEFAULT_AUTO_FIELD='django.db.models.BigAutoField'
+DATA_UPLOAD_MAX_MEMORY_SIZE=4*1024*1024
+FILE_UPLOAD_MAX_MEMORY_SIZE=2*1024*1024
 STATIC_URL='/assets/'
 STATICFILES_DIRS=[BASE_DIR/'frontend'/'dist'/'assets']
 SESSION_COOKIE_HTTPONLY=True
@@ -45,6 +47,12 @@ SECURE_CONTENT_TYPE_NOSNIFF=True
 EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend' if DEMO else 'core.mail_backend.EmailBackend'
 
 TEX_COMPILER=os.environ.get('PLUSFOLIO_TEX_COMPILER',str(LOCAL_DIR/'tools'/'tectonic'))
+PDF_CACHE_MAX_BYTES=int(os.environ.get('PLUSFOLIO_PDF_CACHE_MIB','128'))*1024*1024
+PDF_CACHE_MAX_FILES=int(os.environ.get('PLUSFOLIO_PDF_CACHE_FILES','256'))
+PDF_CACHE_MAX_AGE=int(os.environ.get('PLUSFOLIO_PDF_CACHE_DAYS','7'))*86400
+TEX_ARCHIVE_CACHE_MAX_BYTES=int(os.environ.get('PLUSFOLIO_TEX_ARCHIVE_CACHE_MIB','128'))*1024*1024
+TEX_ARCHIVE_CACHE_MAX_FILES=2
+TEX_ARCHIVE_CACHE_MAX_AGE=14*86400
 
 # Private local CPU service; no third-party inference calls from web requests.
 EMBEDDING_URL=os.environ.get('PLUSFOLIO_EMBEDDING_URL','http://127.0.0.1:8011')

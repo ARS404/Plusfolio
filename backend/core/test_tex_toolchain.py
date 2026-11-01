@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 import hashlib
 import os
@@ -16,6 +17,29 @@ from .models import User
 
 
 class PortableToolchainTests(SimpleTestCase):
+    def test_disabled_archive_cache_returns_service_unavailable_without_building(self):
+        from .documents import CompilerUnavailable
+        from .tex_cache import ArtifactCache
+        with TemporaryDirectory() as directory:
+            for count,age,size in [(0,60,1024),(1,0,1024),(1,60,0)]:
+                with self.subTest(count=count,age=age,size=size),patch('core.tex_cache.toolchain_cache',return_value=ArtifactCache(directory,'zip',size,count,age)),patch('core.tex_toolchain.toolchain_files') as files:
+                    with self.assertRaises(CompilerUnavailable):toolchain_archive(open_file=True)
+                    files.assert_not_called()
+
+    def test_open_archive_remains_readable_after_lru_eviction(self):
+        from .tex_cache import ArtifactCache
+        with TemporaryDirectory() as directory:
+            root=Path(directory)
+            for name in SOURCE_FILES:
+                path=root/name;path.parent.mkdir(parents=True,exist_ok=True)
+                path.write_text("VERSION='0.17.0'\n" if name=='scripts/setup_tex.py' else 'trusted source')
+            resources=root/'.local/tectonic-cache';resources.mkdir(parents=True);(resources/'resource').write_bytes(b'trusted font')
+            with override_settings(BASE_DIR=root,LOCAL_DIR=root/'.local'),toolchain_archive(open_file=True) as stream:
+                path=Path(stream.name)
+                ArtifactCache(path.parent,'zip',0,0,0).prune()
+                self.assertFalse(path.exists())
+                with zipfile.ZipFile(stream) as archive:self.assertIn('toolchain-manifest.json',archive.namelist())
+
     def test_contract_covers_only_selected_sources_and_resources_and_changes_with_them(self):
         with TemporaryDirectory() as directory:
             root=Path(directory)
@@ -79,7 +103,7 @@ class PortableToolchainTests(SimpleTestCase):
              'statement_tex':'','solution_tex':''}
         projects=module.draft_projects({'kind':'problem','problems':[row]})
         task=SimpleNamespace(pk='draft-001',attribution={},**row)
-        sheet=SimpleNamespace(title='Проверка',description='Описание задачи',is_problem=True,template_version='math-a4-v1')
+        sheet=SimpleNamespace(title='Проверка',description='Описание задачи',is_problem=True,template_version='math-a4-v2')
         self.assertEqual(projects['statement'],project_for(sheet,[task],[task.pk],False))
         self.assertEqual(projects['with-solutions'],project_for(sheet,[task],[task.pk],True))
         with self.assertRaises(ValueError):module.draft_projects({'kind':'problem','problems':[{**row,'solution':''}]})
@@ -88,6 +112,15 @@ class PortableToolchainTests(SimpleTestCase):
 
 @override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
 class ToolchainAccessTests(TestCase):
+    def test_archive_response_owns_and_closes_the_opened_cache_handle(self):
+        teacher=User.objects.create_user('archive@toolchain.example','unused',name='Сборка',roles=['teacher'])
+        client=APIClient();client.force_authenticate(user=teacher);stream=io.BytesIO(b'archive')
+        with patch('core.tex_api.toolchain_archive',return_value=stream) as archive:
+            result=client.get('/api/v1/tex/toolchain/archive')
+        self.assertEqual(result.status_code,200);archive.assert_called_once_with(open_file=True)
+        self.assertEqual(b''.join(result.streaming_content),b'archive')
+        result.close();self.assertTrue(stream.closed)
+
     def test_read_only_teachers_can_download_contract_but_students_and_analysts_cannot(self):
         from .authentication import create_token
         for role in ['student','analyst','teacher','admin']:

@@ -42,7 +42,7 @@ def scoped_assignments(user, params):
     topic_ids = s.topic_ids_in_branch(f.query_values(params, 'topic'))
     if topic_ids is not None:
         problems = problems.filter(topics__pk__in=topic_ids)
-    assignments = assignments.filter(Exists(WorksheetItem.objects.filter(worksheet_id=OuterRef('issue__worksheet_id'),problem__in=problems))).distinct()
+    assignments = assignments.filter(Exists(WorksheetItem.objects.filter(worksheet_id=OuterRef('issue__worksheet_id'),problem__in=problems,include_in_journal=True))).distinct()
     return assignments, problems, group_ids
 
 
@@ -68,9 +68,9 @@ def report(user, params):
         pk__in=assignments.values('issue_id')).values_list('pk','worksheet_id','circle_id')}
     worksheet_ids = {wid for wid,_ in issues.values()}
     worksheet_problems = defaultdict(set)
-    for wid, pid in WorksheetItem.objects.filter(worksheet_id__in=worksheet_ids).values_list('worksheet_id', 'problem_id'):
+    for wid, pid in WorksheetItem.objects.filter(worksheet_id__in=worksheet_ids,include_in_journal=True).values_list('worksheet_id', 'problem_id'):
         worksheet_problems[wid].add(pid)
-    selected_ids = set(selected_problems.filter(items__worksheet_id__in=worksheet_ids).values_list('pk', flat=True).distinct())
+    selected_ids = set(selected_problems.filter(items__worksheet_id__in=worksheet_ids,items__include_in_journal=True).values_list('pk', flat=True).distinct())
     selected_by_worksheet = {wid: pids & selected_ids for wid, pids in worksheet_problems.items()}
     issue_ids, circle_ids = set(), set()
     circle_sheets, circle_students = defaultdict(set), defaultdict(set)

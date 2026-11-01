@@ -40,10 +40,18 @@ def metadata(revision,user):
 
 def fields(revision,overrides=None):
     overrides={} if overrides is None else overrides
+    from .content import serialize_blocks
+    blocks=serialize_blocks(revision)
+    if 'blocks' in overrides:content={'blocks':overrides['blocks']}
+    elif 'problems' in overrides:
+        if any(block['kind']=='text' or not block.get('include_in_journal',True) for block in blocks):raise ValidationError('Передайте blocks, чтобы сохранить текст и настройки включения в плюсник.')
+        content={'problems':overrides['problems']}
+    else:content={'blocks':blocks or [{'kind':'problem','problem_id':str(pk)} for pk in revision.items.values_list('problem_id',flat=True)]}
     return {'title':overrides.get('title',revision.title),'description':overrides.get('description',revision.description),
+            'numbering_start':overrides.get('numbering_start',revision.numbering_start),
             'topics':overrides['topics'] if 'topics' in overrides else [str(pk) for pk in revision.topics.values_list('pk',flat=True)],
             'tags':overrides['tags'] if 'tags' in overrides else list(revision.tags.values_list('pk',flat=True)),
-            'problems':overrides['problems'] if 'problems' in overrides else [str(pk) for pk in revision.items.values_list('problem_id',flat=True)]}
+            **content}
 
 
 @transaction.atomic

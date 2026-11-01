@@ -1,12 +1,12 @@
 """Stable versioned aliases reuse the browser API's domain and permission checks."""
 from django.urls import path
 from rest_framework.authentication import SessionAuthentication
-from . import api, automation, api_reference, search_api, tex_api, catalogue_search_api
+from . import api, automation, api_reference, search_api, tex_api, catalogue_search_api,image_assets
 from .api_contract import ROUTES
 from .api_renderers import VersionedJSONRenderer
 from .authentication import ApiAccessPermission, BearerAuthentication
 
-MODULES = {'api':api, 'automation':automation, 'api_reference':api_reference, 'search_api':search_api, 'tex_api':tex_api, 'catalogue_search_api':catalogue_search_api}
+MODULES = {'api':api, 'automation':automation, 'api_reference':api_reference, 'search_api':search_api, 'tex_api':tex_api, 'catalogue_search_api':catalogue_search_api,'image_assets':image_assets}
 
 
 def versioned_view(view, *, credential_exchange=False):

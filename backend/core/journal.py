@@ -1,8 +1,34 @@
 """Shared, permission-scoped journal snapshot for screen and file exports."""
 from django.core.exceptions import ValidationError
-from django.db.models import Prefetch
-from .models import WorksheetItem, Problem, Solve, Discussion
+from django.db.models import Prefetch,prefetch_related_objects
+from .models import Problem,Solve,Discussion
 from . import services as s
+
+
+def view_options(params):
+    hide=params.get('hide_discussed','0');order=params.get('order','newest')
+    if hide not in {'0','1'} or order not in {'newest','oldest'}:
+        raise ValidationError('hide_discussed: 0 или 1; order: newest или oldest.')
+    return {'hide_discussed':hide=='1','order':order}
+
+
+def apply_view(data, *, hide_discussed=False, order='newest'):
+    """Keep original task numbers while selecting the same columns for UI and exports."""
+    if order not in {'newest','oldest'}:raise ValidationError('Неизвестный порядок листков.')
+    discussed={state['problem_id'] for state in data['discussions'] if state['discussed']}
+    blocks=[]
+    for block in data['blocks']:
+        problems=[problem if 'worksheet_position' in problem else {**problem,'worksheet_position':position}
+                  for position,problem in enumerate(block['problems'],1)
+                  if not hide_discussed or problem['id'] not in discussed]
+        # Keep genuinely theoretical worksheets, but drop task blocks emptied by the filter.
+        if block['problems'] and not problems:continue
+        blocks.append({**block,'problems':problems})
+    blocks.sort(key=lambda block:(block['issued_on'],block['issue_id']),reverse=order=='newest')
+    visible={problem['id'] for block in blocks for problem in block['problems']}
+    return {**data,'blocks':blocks,
+            'solves':[state for state in data['solves'] if state['problem_id'] in visible],
+            'discussions':[state for state in data['discussions'] if state['problem_id'] in visible]}
 
 
 def select_issues(circle, raw='all', *, for_export=False):
@@ -12,10 +38,10 @@ def select_issues(circle, raw='all', *, for_export=False):
         problems = Problem.objects.only('id', 'title', 'number', 'source', 'source_id')
     else:
         problems = Problem.objects.select_related('author').prefetch_related('topics', 'tags')
-    items = WorksheetItem.objects.prefetch_related(Prefetch('problem', queryset=problems))
     queryset = circle.issues.select_related('worksheet__document').prefetch_related(
-        Prefetch('worksheet__items', queryset=items)
+        'worksheet__items'
     ).order_by('-issued_on', '-pk')
+    ids=None
     if raw != 'all':
         try:
             ids = {int(value) for value in raw.split(',')}
@@ -24,11 +50,14 @@ def select_issues(circle, raw='all', *, for_export=False):
         if not ids or any(value <= 0 for value in ids):
             raise ValidationError('Некорректный набор листков.')
         queryset = queryset.filter(pk__in=ids)
-        result = list(queryset)
-        if {issue.pk for issue in result} != ids:
-            raise s.NotFound('Один из листков не выдавался этому кружку.')
-        return result
-    return list(queryset)
+    result=list(queryset)
+    if ids is not None and {issue.pk for issue in result} != ids:
+        raise s.NotFound('Один из листков не выдавался этому кружку.')
+    # Every item keeps its place in the printed numbering. Excluded items do
+    # not need their potentially large problem bodies in a journal response.
+    included=[item for issue in result for item in issue.worksheet.items.all() if item.include_in_journal]
+    prefetch_related_objects(included,Prefetch('problem',queryset=problems))
+    return result
 
 
 def snapshot(user, circle, selected, serialize_problem, search=''):
@@ -39,14 +68,17 @@ def snapshot(user, circle, selected, serialize_problem, search=''):
     serialized = {}
     from .documents import issue_references
     for issue in selected:
-        problems = [item.problem for item in issue.worksheet.items.all()]
-        for problem in problems:
+        problems=[]
+        for number,item in enumerate(issue.worksheet.items.all(),issue.worksheet.numbering_start):
+            if not item.include_in_journal:continue
+            problem=item.problem
             if problem.pk not in serialized:serialized[problem.pk]=serialize_problem(problem,user)
-        problem_ids.update(problem.pk for problem in problems)
+            problem_ids.add(problem.pk)
+            problems.append({**serialized[problem.pk],'worksheet_position':number})
         blocks.append({
             'issue_id': issue.pk, 'issued_on': issue.issued_on.isoformat(), 'number':issue.number,
             'worksheet': {'id': str(issue.worksheet_id), 'public_id':f'W-{issue.worksheet.document.number_id}', 'title': issue.worksheet.title, 'description': issue.worksheet.description,**issue_references(issue)},
-            'problems': [serialized[problem.pk] for problem in problems],
+            'problems': problems,
         })
     states = Solve.objects.filter(student_id__in=[person.student_id for person in people], problem_id__in=problem_ids).values_list('student_id', 'problem_id', 'solved', 'version')
     discussions = Discussion.objects.filter(circle=circle, problem_id__in=problem_ids).values_list('problem_id', 'discussed', 'solution_visible', 'version')

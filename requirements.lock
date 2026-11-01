@@ -11,3 +11,5 @@ pycparser==3.11
 sqlparse==0.6.0
 numpy==2.5.4
 pgvector==0.5.1
+
+Pillow==13.0.0

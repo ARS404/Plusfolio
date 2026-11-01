@@ -31,7 +31,7 @@ def assert_contract(schema, value, definitions, path='$'):
     elif kind=='object':
         assert isinstance(value,dict),path+': ожидался объект'
         properties=schema.get('properties',{})
-        assert set(schema.get('required',[]))<=set(value),path+': отсутствуют обязательные поля'
+        assert set(schema.get('required',[]))<=set(value),path+': отсутствуют обязательные поля '+','.join(set(schema.get('required',[]))-set(value))
         if properties and schema.get('additionalProperties') is not True:
             assert set(value)<=set(properties),path+': неописанные поля '+','.join(set(value)-set(properties))
         for name,item in value.items():

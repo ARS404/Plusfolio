@@ -21,7 +21,8 @@ def columns(data):
     result = []
     for index, block in enumerate(data['blocks']):
         for number, problem in enumerate(block['problems'], 1):
-            result.append((index, block, problem, f'№{number} · {problem["title"]}'))
+            position=problem.get('worksheet_position',number)
+            result.append((index, block, problem, f'№{position} · {problem["title"]}'))
         if data['show_group_stats']:
             result.append((index, block, None, 'Решено'))
     return result
