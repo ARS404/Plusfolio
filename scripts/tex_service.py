@@ -6,6 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 SOCKET=Path(os.environ.get('PLUSFOLIO_TEX_SOCKET','/run/plusfolio-tex/compiler.sock'))
 LIMIT=8*1024*1024
 GATE=threading.BoundedSemaphore(1)
+MAX_CLIENTS=4
 sys.path.insert(0,str(ROOT/'backend'))
 from core.tex_project import write_project
 from core.tex_runtime import run_compiler,job_directory
@@ -43,11 +44,14 @@ class Handler(socketserver.StreamRequestHandler):
             if not 1<=size<=LIMIT:raise ValueError('Invalid request size')
             payload=self.rfile.read(size)
             if len(payload)!=size:raise ValueError('Incomplete request')
-            value=json.loads(payload)
+            # Probe messages are tiny. Large projects are decoded only by the active compiler.
+            value=json.loads(payload) if size<=1024 else None
             if value=={'health':True}:result={'ok':True}
             elif not GATE.acquire(blocking=False):result={'error':'Сборка PDF занята. Повторите позже.','busy':True}
             else:
-                try:result=compile_project(value)
+                try:
+                    if size>1024:value=json.loads(payload)
+                    result={'ok':True} if value=={'health':True} else compile_project(value)
                 finally:GATE.release()
         except Exception as exc:
             result={'error':str(exc) if isinstance(exc,ValueError) else 'Компилятор временно недоступен.'}
@@ -57,6 +61,23 @@ class Handler(socketserver.StreamRequestHandler):
 class Server(socketserver.ThreadingUnixStreamServer):
     daemon_threads=True
     request_queue_size=4
+
+    def __init__(self,*args,**kwargs):
+        self.clients=threading.BoundedSemaphore(MAX_CLIENTS)
+        super().__init__(*args,**kwargs)
+
+    def process_request(self,request,client_address):
+        if not self.clients.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:super().process_request(request,client_address)
+        except BaseException:
+            self.clients.release()
+            raise
+
+    def process_request_thread(self,request,client_address):
+        try:super().process_request_thread(request,client_address)
+        finally:self.clients.release()
 
 
 if __name__=='__main__':

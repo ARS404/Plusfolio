@@ -323,6 +323,7 @@ class Conflict(Exception):pass
 @transaction.atomic
 def mark(user,circle,problem_id,data,discussion=False,solution_visibility=False):
     require(can_write(user,circle))
+    Circle.objects.select_for_update().get(pk=circle.pk)
     scope={'items__worksheet__issues__circle':circle}
     if not (discussion or solution_visibility):scope['items__include_in_journal']=True
     problem=Problem.objects.only('pk').filter(pk=problem_id,**scope).first()
@@ -340,6 +341,8 @@ def mark(user,circle,problem_id,data,discussion=False,solution_visibility=False)
     previous=getattr(row,field) if row else False
     previous_visibility=row.solution_visible if discussion and row else False
     if (row.version if row else 0)!=version:raise Conflict('Отметка уже изменена. Обновите журнал.')
+    if not discussion and value and not previous and Discussion.objects.filter(circle=circle,problem=problem,discussed=True).exists():
+        raise ValidationError('Задача уже разобрана в этом кружке: принять новое решение нельзя.')
     if solution_visibility and value and (row is None or not row.discussed):
         raise ValidationError('Сначала отметьте задачу как разобранную в кружке.')
     if row:

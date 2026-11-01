@@ -1,0 +1,189 @@
+{
+  "date": "2026-11-01",
+  "comparison": "Before = local uncommitted issue-update features at audit start; after = two cleanup passes. No version or dependency change.",
+  "backend": {
+    "environment": {
+      "python": "3.14.2",
+      "platform": "darwin",
+      "machine": "arm64"
+    },
+    "scope": "Synthetic local helper/report measurements in a temporary SQLite database, not production load or full-page latency. tracemalloc excludes fixture setup and observes Python allocations only.",
+    "analytics_fixture": {
+      "students": 200,
+      "tasks": 240,
+      "circles": 3,
+      "issues": 4,
+      "solve_rows": 16000
+    },
+    "identical_report_scenarios": 24,
+    "analytics": {
+      "1": {
+        "before": {
+          "median_ms": 179.778,
+          "peak_python_bytes": 4294949,
+          "samples": 3
+        },
+        "after": {
+          "median_ms": 173.281,
+          "peak_python_bytes": 2378691,
+          "samples": 3
+        }
+      },
+      "0": {
+        "before": {
+          "median_ms": 179.173,
+          "peak_python_bytes": 4729752,
+          "samples": 3
+        },
+        "after": {
+          "median_ms": 167.256,
+          "peak_python_bytes": 2304982,
+          "samples": 3
+        }
+      }
+    },
+    "issue_options": {
+      "recent": {
+        "before": {
+          "median_ms": 51.256,
+          "peak_python_bytes": 2603171,
+          "samples": 3,
+          "queries": 5
+        },
+        "after": {
+          "median_ms": 24.512,
+          "peak_python_bytes": 528591,
+          "samples": 3,
+          "queries": 4
+        }
+      },
+      "oldest_fallback": {
+        "before": {
+          "median_ms": 63.335,
+          "peak_python_bytes": 2693519,
+          "samples": 3,
+          "queries": 6
+        },
+        "after": {
+          "median_ms": 26.963,
+          "peak_python_bytes": 554937,
+          "samples": 3,
+          "queries": 5
+        }
+      }
+    },
+    "issue_options_fixture": {
+      "revisions": 53,
+      "description_characters_per_revision": 30000,
+      "tasks_per_new_revision": 20,
+      "recent_choices": 50,
+      "fallback_choices": 51
+    }
+  },
+  "frontend": {
+    "scope": "Pure journalTotals helper microbenchmark, not browser latency or JavaScript heap/RSS measurement.",
+    "environment": {
+      "node": "v26.3.1",
+      "platform": "darwin",
+      "arch": "arm64"
+    },
+    "fixture": {
+      "students": 200,
+      "unique_tasks": 400,
+      "state_rows": 80000,
+      "worksheet_blocks": 12
+    },
+    "results_identical": true,
+    "before": {
+      "median_ms": 2.006539600000002,
+      "samples": 7,
+      "calls_per_sample": 20
+    },
+    "after": {
+      "median_ms": 1.9404500000000042,
+      "samples": 7,
+      "calls_per_sample": 20
+    },
+    "change": "Removed spread/map/filter arrays during totals aggregation; per-student sets still deduplicate repeated solve rows."
+  },
+  "compiler_admission": {
+    "simultaneous_handlers": 4,
+    "simultaneous_compilations": 1,
+    "busy_large_json_decodes": 0,
+    "overflow": "Client gets existing compiler-unavailable error; no new handler thread.",
+    "tests": "Core tests exercise real handler threads using unbound sockets and synthetic requests; no Docker runtime in this local audit."
+  },
+  "static_checks": {
+    "typescript_no_unused_locals_and_parameters": "passed",
+    "python_source_ast_unused_import_candidates": []
+  },
+  "disk": {
+    "scope": "Unused generated staging artifacts and redundant unchanged source snapshot copies; rollback copies of changed files retained",
+    "removed": [
+      {
+        "path": "staging/frontend/dist",
+        "files": 70,
+        "bytes": 3609490
+      },
+      {
+        "path": "staging/.local/pdf-cache",
+        "artifacts": 2,
+        "bytes": 91475
+      },
+      {
+        "path": "audit/source-before (unchanged copies)",
+        "files": 248,
+        "bytes": 3993500
+      }
+    ],
+    "freed_bytes": 7694465,
+    "preserved": [
+      "source and audit evidence",
+      "runtime databases and backups",
+      "canonical production build",
+      "active Vite cache",
+      "dependencies and shared TeX binary/resources",
+      "warm canonical PDF/toolchain caches"
+    ]
+  },
+  "verification": {
+    "backend": {
+      "total": 364,
+      "passed": 360,
+      "skipped": 4,
+      "seconds": 214.993,
+      "skip_reason": "PostgreSQL-only checks; local SQLite suite"
+    },
+    "frontend": {
+      "passed": 35,
+      "typescript_no_unused": "passed",
+      "production_build": "passed",
+      "existing_warning": "Main JS chunk remains above the default 500 kB warning threshold"
+    },
+    "deployment_helpers": {
+      "passed": 38
+    },
+    "real_tectonic": {
+      "compiler_exit": 0,
+      "resources_unchanged": true,
+      "pdf_cache_unchanged": true,
+      "preview_jobs_remaining": 0,
+      "pdf_bytes": {
+        "with-solutions.pdf": 35077,
+        "statement.pdf": 33787
+      }
+    },
+    "local_learning_tables_unchanged": true,
+    "schema_changes": false,
+    "version": "1.0.2 unchanged",
+    "git": "No commit, tag or push",
+    "browser": [
+      "Journal summary remains 4 solved, 2 available, 2 discussed-unsolved, 8 total",
+      "Issue editor loads available revision metadata; cancelled without saving",
+      "Analytics text search filters 12 student rows down to S-1 and clearing restores 12",
+      "Discussion checkbox changes 46/96 to 30/75 as before cleanup",
+      "Browser console has no errors",
+      "Checkbox row alignment corrected against generic filter-label styles."
+    ]
+  }
+}

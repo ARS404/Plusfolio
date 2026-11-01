@@ -217,7 +217,7 @@ def issue_data(issue,personal=False):
     return {'id':issue.pk,'public_id':public_id('worksheet',issue.worksheet.document.number_id),'issue_public_id':public_id('issue',issue.pk),'worksheet_id':str(issue.worksheet_id),'document_id':str(issue.worksheet.document_id),'revision':issue.worksheet.revision,'title':issue.worksheet.title,'description':issue.worksheet.description,
         'tags':[{'id':tag.pk,'public_id':public_id('tag',tag.pk),'name':tag.name} for tag in issue.worksheet.tags.all()],
         'circle_id':str(issue.circle_id),'circle_public_id':public_id('circle',issue.circle.number_id),'circle_name':issue.circle.name,'city':issue.circle.city,
-        'number':issue.number,'issued_on':issue.issued_on.isoformat(),'problem_count':issue._problem_count if hasattr(issue,'_problem_count') else issue.worksheet.items.count(),
+        'number':issue.number,'version':issue.version,'issued_on':issue.issued_on.isoformat(),'problem_count':issue._problem_count if hasattr(issue,'_problem_count') else issue.worksheet.items.count(),
         **issue_references(issue,personal)}
 
 @api_view(['GET'])
@@ -251,11 +251,21 @@ def personal_issue(user,pk):
     if not issue:raise s.NotFound('Листок не назначался вам.')
     return issue
 
-@api_view(['GET'])
+@api_view(['GET','PATCH'])
 def issue_detail(request,pk,issue_id):
-    circle=s.get_circle(request.user,pk);issue=circle.issues.select_related('worksheet__document','worksheet__author','circle').prefetch_related('worksheet__tags').get(pk=issue_id)
+    circle=s.get_circle(request.user,pk)
+    if request.method=='PATCH':
+        from .issue_updates import update
+        issue=update(request.user,circle,issue_id,request.data)
+    else:issue=circle.issues.select_related('worksheet__document','worksheet__author','circle').prefetch_related('worksheet__tags').get(pk=issue_id)
     payload=material_data(issue.worksheet,request.user,True,circle);issue._problem_count=payload['problem_count']
     return Response({**payload,**issue_data(issue)})
+
+
+@api_view(['GET'])
+def issue_edit_options(request,pk,issue_id):
+    from .issue_updates import options
+    return Response(options(request.user,s.get_circle(request.user,pk),issue_id))
 
 @api_view(['GET'])
 def my_issue_detail(request,issue_id):

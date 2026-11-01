@@ -108,7 +108,9 @@ ROUTES = [
     'GET': operation('issueList', 'Выдачи листков кружку', parameters=[Q,TAG,query('mode','hybrid — названия и описания по тексту и смыслу; text — обычный поиск.',schema={'enum':['text','hybrid'],'default':'text'})]),
     'POST': operation('issueCreate', 'Выдать один или несколько листков', 'writer', body=obj({'worksheet_ids':ARRAY_UUID,'issued_on':{'type':'string','format':'date'}}, ['worksheet_ids','issued_on']),
         example={'worksheet_ids':['<REVISION_UUID>'],'issued_on':'2026-10-26'}, description='Массив UUID версий, не document_id. Дата не в будущем. Набор сохраняется атомарно. Ответ — обновлённый список выдач.')}),
- ('circles/<uuid:pk>/issues/<int:issue_id>', 'api.issue_detail', {'GET': operation('issueGet', 'Получить фиксированную выданную версию листка')}),
+ ('circles/<uuid:pk>/issues/<int:issue_id>/editing','api.issue_edit_options',{'GET':operation('issueEditOptions','Версии листка для обновления выдачи','writer',description='Только преподаватель активного кружка или администратор. Доступные версии того же документа и разница состава задач.')}),
+ ('circles/<uuid:pk>/issues/<int:issue_id>', 'api.issue_detail', {'GET': operation('issueGet', 'Получить выданную версию листка'),
+    'PATCH':operation('issueUpdate','Изменить дату или версию выданного листка','writer',body=obj({'version':INT,'worksheet_id':UUID,'issued_on':{'type':'string','format':'date'}},['version']),description='Ожидаемая version выдачи из GET. Только доступная версия того же document_id; номер, назначения и общие отметки сохраняются. При конфликте 409.')}),
  ('circles/<uuid:pk>/issues/<int:issue_id>/<str:file_kind>', 'api.issue_document', {'GET': operation('issueFile', 'PDF/TeX/ZIP конкретной выдачи', parameters=SOURCE, binary=True)}),
  ('circles/<uuid:pk>/journal', 'api.journal', {'GET': operation('journalGet', 'Журнал, блоки задач и версии отметок', parameters=[ISSUES,Q,*JOURNAL_VIEW])}),
  ('circles/<uuid:pk>/journal/export', 'api.journal_export', {'GET': operation('journalExport', 'Выгрузить текущий срез журнала', parameters=[ISSUES,Q,*JOURNAL_VIEW,query('file_format','Формат файла.',schema={'enum':['xlsx','tsv'],'default':'xlsx'})], binary=True)}),
@@ -141,7 +143,7 @@ ROUTES = [
  ('tags', 'api.tags', {
     'GET': operation('tagList', 'Теги всех трёх справочников',parameters=[Q]),
     'POST': operation('tagCreate', 'Создать тег', 'admin',body=obj({'kind':{'enum':['problem','worksheet','circle']},'name':STRING},['kind','name']),example={'kind':'worksheet','name':'Домашняя работа'},status=201)}),
- ('analytics', 'api.analytics', {'GET': operation('analyticsGet', 'Личный или групповой отчёт в пределах доступа',parameters=[query('circle','UUID кружка.',multiple=True,schema=UUID),CITY,TOPIC,query('problem_tag','Числовой ID тега задач.',multiple=True,schema=INT),query('worksheet_tag','Числовой ID тега листков.',multiple=True,schema=INT)],
+ ('analytics', 'api.analytics', {'GET': operation('analyticsGet', 'Личный или групповой отчёт в пределах доступа',parameters=[query('circle','UUID кружка.',multiple=True,schema=UUID),CITY,TOPIC,query('problem_tag','Числовой ID тега задач.',multiple=True,schema=INT),query('worksheet_tag','Числовой ID тега листков.',multiple=True,schema=INT),query('include_discussed','1 — учитывать разобранные задачи (по умолчанию); 0 — исключать их в контексте выдачи. Общая пара остаётся, если задача ещё не разобрана хотя бы в одном выбранном кружке получателя.',schema={'enum':['0','1'],'default':'1'})],
     description='Текущее состояние уникальных пар школьник × задача. Для student — только личные данные, если другие роли не дают более широкого доступа.')}),
  ('invitations', 'api.invitations', {
     'GET': operation('invitationList', 'Мои приглашения; у администратора — все', 'inviter',parameters=[Q]),

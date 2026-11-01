@@ -90,6 +90,7 @@ WORKSHEET={**MATERIAL_BASE,
  'problem_count':number('Количество задач.'),'problem_ids':array(UUID,'UUID задач в порядке листка.'),
 }
 ISSUE={
+ 'version':number('Версия выдачи для безопасного PATCH.',minimum=1),
  'id':number('Числовой ID выдачи; это не UUID версии листка.'),
  'public_id':text('W-ID логического листка.'),'issue_public_id':text('Публичный ISS-ID выдачи.'),
  'worksheet_id':UUID,'document_id':UUID,'revision':number('Номер зафиксированной версии листка.'),
@@ -209,6 +210,8 @@ SCHEMAS['Account']=record('Личный кабинет',{
  'admin':nullable(record('Общая сводка администратора',{key:number() for key in ['active_circles','active_users','problems','worksheets']}),'null без роли администратора.'),
  'pending_invitations':number('Непринятые действующие приглашения; поле отсутствует у аккаунта только с ролью школьника.')},
  ['user','joined_at','circle_count','active_circle_count','circles','student','teacher','analyst','admin'])
+SCHEMAS['IssueEditOptions']=record('Варианты обновления выдачи',{'version':number(),'worksheet_id':UUID,'issued_on':DATE,'number':number(),
+ 'versions':array(record('Доступная версия',{'id':UUID,'revision':number(),'title':text(),'problem_count':number(),'tracked_count':number(),'added':number(),'removed':number()},['id','revision','title','problem_count','tracked_count','added','removed']))},['version','worksheet_id','issued_on','number','versions'])
 SCHEMAS['ProblemProgress']=record('Закрытие задачи',{
  'problem_id':UUID,'public_id':text('P-ID.'),'title':text(),'recipients':number('Уникальные получатели задачи в срезе.'),
  'solved':number('Уникальные получатели с отметкой «Решена».'),'remaining':number(),'percent':PERCENT,
@@ -220,12 +223,12 @@ SCHEMAS['WorksheetProgress']=record('Прогресс листка',{
  'completed_recipients':number('Получатели, решившие все задачи этой версии, независимо от фильтра.'),'full_percent':PERCENT,
  'circle_count':number(),'issue_count':number()},['id','public_id','title','recipients','problem_count','total_problem_count','assigned','solved','percent','completed_recipients','full_percent','circle_count','issue_count'])
 SCHEMAS['Analytics']=record('Аналитический отчёт',{
- 'personal_only':boolean('В отчёте только личные назначения и результаты.'),'assigned_pairs':number('Уникальные назначенные пары школьник × задача.'),
+ 'include_discussed':boolean('Включены разобранные задачи.'),'personal_only':boolean('В отчёте только личные назначения и результаты.'),'assigned_pairs':number('Уникальные назначенные пары школьник × задача.'),
  'solved_pairs':number('Решённые пары выбранного среза.'),'percent':PERCENT,'student_count':number(),'problem_count':number(),
  'rows':array(ref('ProblemProgress')),
  'counts':record('Сводные показатели',{
     **{key:number(desc) for key,desc in {
-      'remaining_pairs':'Оставшиеся пары школьник × задача.','worksheet_count':'Разные версии листков.','issue_count':'Количество выдач.',
+      'available_pairs':'Нерешённые пары, доступные для сдачи хотя бы в одном выбранном кружке.','discussed_unsolved_pairs':'Нерешённые пары, разобранные во всех выбранных кружках получателя.','remaining_pairs':'Оставшиеся пары школьник × задача.','worksheet_count':'Разные версии листков.','issue_count':'Количество выдач.',
       'circle_count':'Кружки с назначениями.','full_worksheet_count':'Полностью закрытые пары получатель × листок.',
       'worksheet_recipient_count':'Все пары получатель × версия листка.','students_with_solves':'Школьники хотя бы с одним решением.',
       'students_without_solves':'Школьники без решений.','students_completed':'Школьники, решившие все назначенные задачи среза.'}.items()},
@@ -233,7 +236,7 @@ SCHEMAS['Analytics']=record('Аналитический отчёт',{
  'discussion':nullable(record('Охват разбором',{'total':number('Пары кружок × задача.'),'discussed':number(),'remaining':number(),'visible':number('Открытые решения.'),'percent':PERCENT}), 'null без групповой аналитики.'),
  'distribution':array(record('Диапазон прогресса',{'label':text(),'count':number()}),'Пустой массив в личном отчёте.'),
  'worksheet_rows':array(ref('WorksheetProgress')),
- 'student_rows':array(record('Результаты школьника',{**PERSON,'assigned':number(),'solved':number(),'remaining':number(),'percent':PERCENT}),'Пустой массив без группового доступа.'),
+ 'student_rows':array(record('Результаты школьника',{**PERSON,'assigned':number(),'solved':number(),'remaining':number(),'available':number(),'discussed_unsolved':number(),'percent':PERCENT}),'Пустой массив без группового доступа.'),
  'topic_rows':array(record('Результаты темы',{'id':nullable(UUID),'public_id':nullable(text()),'name':text(),'path':text('Полный путь темы.'),'depth':number(),
     'assigned':number(),'solved':number(),'recipients':number(),'problem_count':number(),'percent':PERCENT})),
  'circle_rows':array(record('Результаты кружка',{'id':UUID,'public_id':text(),'name':text(),'city':text(),'archived':boolean(),
@@ -337,6 +340,7 @@ RESPONSES={
  'memberList':array(ref('Member')),'memberAdd':array(ref('Member')),'memberRemove':array(ref('Member')),
  'studentSearch':array(ref('StudentSearch')),'studentUpdate':ref('StudentUpdated'),'teacherAdd':ref('Circle'),'teacherRemove':ref('Circle'),
  'issueList':array(ref('Issue')),'issueCreate':array(ref('Issue')),'issueGet':ref('IssueDetail'),
+ 'issueUpdate':ref('IssueDetail'),'issueEditOptions':ref('IssueEditOptions'),
  'journalGet':ref('Journal'),'journalIssueGet':ref('JournalIssue'),
  'journalMark':alternatives('Ответ зависит от kind',ref('MarkSolve'),ref('MarkDiscussion'),ref('MarkVisibility')),
  'circleAudit':array(ref('AuditEvent')),'materialList':ref('MaterialList'),'materialCreate':MATERIAL_VARIANTS,

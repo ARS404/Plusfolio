@@ -17,7 +17,7 @@ export function journalView(blocks:JournalBlock[],discussions:{problem_id:string
  }).sort((a,b)=>((a.issued_on.localeCompare(b.issued_on)||a.issue_id-b.issue_id)*(order==='oldest'?1:-1)));
 }
 
-export function journalTotals(blocks:JournalBlock[],states:{student_id:number;problem_id:string;solved:boolean}[]){
+export function journalTotals(blocks:JournalBlock[],states:{student_id:number;problem_id:string;solved:boolean}[],discussions:{problem_id:string;discussed:boolean}[]=[]){
  const problems=new Set<string>();
  for(const block of blocks)for(const problem of block.problems)problems.add(problem.id);
  const solved=new Map<number,Set<string>>();
@@ -26,5 +26,18 @@ export function journalTotals(blocks:JournalBlock[],states:{student_id:number;pr
   const tasks=solved.get(state.student_id)??new Set<string>();
   tasks.add(state.problem_id);solved.set(state.student_id,tasks);
  }
- return {total:problems.size,solved:new Map([...solved].map(([student,tasks])=>[student,tasks.size]))};
+ const discussed=new Set<string>();
+ for(const state of discussions)if(state.discussed&&problems.has(state.problem_id))discussed.add(state.problem_id);
+ const counts=new Map<number,number>(),solvedDiscussed=new Map<number,number>();
+ for(const [student,tasks] of solved){
+  counts.set(student,tasks.size);let covered=0;
+  for(const id of tasks)if(discussed.has(id))covered++;
+  solvedDiscussed.set(student,covered);
+ }
+ return {total:problems.size,discussed:discussed.size,solved:counts,solvedDiscussed};
+}
+
+export function journalStudentSummary(totals:ReturnType<typeof journalTotals>,student:number){
+ const solved=totals.solved.get(student)||0,discussedUnsolved=totals.discussed-(totals.solvedDiscussed.get(student)||0);
+ return {solved,available:totals.total-solved-discussedUnsolved,discussedUnsolved,total:totals.total};
 }

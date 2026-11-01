@@ -35,6 +35,7 @@ urlpatterns=[
     path('api/worksheet-documents/<uuid:pk>',api.worksheet_document),
     path('api/worksheet-documents/<uuid:pk>/publish',api.worksheet_publish),
     path('api/worksheets/<uuid:pk>/copy',api.worksheet_copy),
+    path('api/circles/<uuid:pk>/issues/<int:issue_id>/editing',api.issue_edit_options),
     path('api/circles/<uuid:pk>/issues/<int:issue_id>',api.issue_detail),
     path('api/circles/<uuid:pk>/issues/<int:issue_id>/<str:file_kind>',api.issue_document),
     path('api/circles',api.circles),path('api/circles/<uuid:pk>',api.circle_detail),

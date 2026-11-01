@@ -1,0 +1,71 @@
+{
+  "version": "1.0.3",
+  "date": "2026-11-01",
+  "scope": "Local release preparation; no commit, tag, push or server installation",
+  "metadata": {
+    "release_status": "released",
+    "frontend_versions_synchronized": true,
+    "expected_tag_check": "v1.0.3 passed; tag not created",
+    "source_revision": "07fdb6675bba84a3ccebc3b33ec1cddbc3257ccc-dirty"
+  },
+  "current_checks": {
+    "targeted_backend": {
+      "passed": 19,
+      "skipped": 0,
+      "modules": [
+        "test_release",
+        "test_block_migration",
+        "test_issue_updates",
+        "test_tex_service_limits"
+      ]
+    },
+    "frontend": {
+      "passed": 35,
+      "typescript_and_production_build": "passed"
+    },
+    "deployment_helpers": {
+      "shared_host_passed": 22,
+      "capacity_passed": 3,
+      "image_update_passed": 6,
+      "total_passed": 31,
+      "scope": "Local helper tests, Docker calls mocked; shared-host test binds a temporary loopback port"
+    },
+    "migration_drift": "No changes detected",
+    "browser": {
+      "release_footer": "Plusfolio 1.0.3",
+      "circle_issue_list": "rendered with issue editor controls",
+      "journal": "restored after version check",
+      "console_errors": 0
+    },
+    "git_diff_check": "passed"
+  },
+  "migration": {
+    "name": "0019_issue_edit_version",
+    "operation": "Add WorksheetIssue.version with default=1",
+    "from_0018": "All prior scalar fields of 16 fixture models unchanged, including image bytes; image relations preserved; numbering_start=0 and journal exclusions preserved",
+    "repeat": "Does not reset an existing issue version of 7",
+    "older_upgrade": "0016 to 0019 preservation test passed",
+    "test_database": "Disposable SQLite, not the live demo database"
+  },
+  "previous_full_regression": {
+    "report": "../benchmarks/cleanup-2026-11-01.json",
+    "backend_passed": 360,
+    "backend_skipped": 4,
+    "frontend_passed": 35,
+    "deployment_helpers_passed": 38,
+    "real_tectonic": "statement and solutions PDFs passed without changing trusted resources or leaving preview jobs",
+    "reuse_reason": "Product code and dependencies unchanged during release preparation; new migration preservation test and release metadata checked again"
+  },
+  "limitations": [
+    "Linux/Docker and PostgreSQL integration not run locally during this preparation; verify CI before production installation",
+    "Previous full suite skipped four PostgreSQL-only checks",
+    "Production build retains main JavaScript chunk warning above 500 kB",
+    "Targeted staging backend run reports missing staging dist assets; canonical production dist build passed"
+  ],
+  "preservation": {
+    "prior_local_feature_and_cleanup_changes": "preserved",
+    "live_database_migration_during_preparation": false,
+    "tex_cache_reset": false,
+    "dependencies_changed": false
+  }
+}

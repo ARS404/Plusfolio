@@ -304,6 +304,7 @@ class WorksheetBlock(models.Model):
         super().save(*args,**kwargs)
 
 class WorksheetIssue(models.Model):
+    version=models.PositiveIntegerField(default=1)
     circle=models.ForeignKey(Circle,on_delete=models.PROTECT,related_name='issues')
     worksheet=models.ForeignKey(Worksheet,on_delete=models.PROTECT,related_name='issues')
     document=models.ForeignKey(WorksheetDocument,on_delete=models.PROTECT,related_name='issues')

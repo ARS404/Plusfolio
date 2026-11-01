@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {journalView,journalTotals} from '../src/journalView.ts';
+import {journalView,journalTotals,journalStudentSummary} from '../src/journalView.ts';
 
 const blocks=[
  {issue_id:3,issued_on:'2026-10-22',problems:[{id:'a'},{id:'b'},{id:'c'}]},
@@ -60,4 +60,14 @@ test('numbered server tasks and unaffected blocks are shared without cloning',()
  const hidden=journalView(original,[{problem_id:'a',discussed:true}],true,'oldest');
  assert.equal(hidden[1],original[1]);assert.equal(hidden[0].problems[0],original[0].problems[1]);
  assert.equal(hidden[0].problems[0].worksheet_position,2);assert.equal(original[0].problems.length,2);
+});
+
+test('summary partitions selected unique tasks into solved, available and discussed unsolved',()=>{
+ const slice=[{issue_id:1,issued_on:'2026-01-01',problems:[{id:'a'},{id:'b'},{id:'c'},{id:'d'}]},{issue_id:2,issued_on:'2026-02-01',problems:[{id:'a'}]}];
+ const discussions=[{problem_id:'a',discussed:true},{problem_id:'b',discussed:true}];
+ const marks=[{student_id:1,problem_id:'a',solved:true},{student_id:1,problem_id:'c',solved:true}];
+ assert.deepEqual(journalStudentSummary(journalTotals(slice,marks,discussions),1),{solved:2,available:1,discussedUnsolved:1,total:4});
+ assert.deepEqual(journalStudentSummary(journalTotals(slice,marks,discussions),2),{solved:0,available:2,discussedUnsolved:2,total:4});
+ const hidden=journalView(slice,discussions,true,'oldest');
+ assert.deepEqual(journalStudentSummary(journalTotals(hidden,marks,discussions),1),{solved:1,available:1,discussedUnsolved:0,total:2});
 });
