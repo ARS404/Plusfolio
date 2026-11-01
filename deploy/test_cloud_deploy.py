@@ -107,11 +107,45 @@ class ImageTests(unittest.TestCase):
             values=server.server_host.shared_values({'COMPOSE_PROJECT_NAME':'own','INSTANCE_ID':'synthetic'})
             server.write_env(values);before=(server.STATE/'env').read_bytes()
             running=[{'State':{'Running':True},'Config':{'Labels':{'com.docker.compose.service':'web'}}}]
-            with patch('server.preflight',return_value=(running,{'cpus':2,'memory_mib':3392})),patch('server.compose',side_effect=RuntimeError('synthetic backup failure')) as compose,patch('server.backup_key') as key,patch('builtins.print'):
+            def action(*args,**kwargs):
+                if args[:3]==('exec','-T','backup'):raise RuntimeError('synthetic backup failure')
+                return Mock()
+            with patch('server.preflight',return_value=(running,{'cpus':2,'memory_mib':3392})),patch('server.compose',side_effect=action) as compose,patch('server.backup_key') as key,patch('builtins.print'):
                 with self.assertRaisesRegex(RuntimeError,'backup failure'):
                     server.run(argparse.Namespace(command='update',no_build=True,release=None))
             self.assertEqual((server.STATE/'env').read_bytes(),before);key.assert_not_called()
-            self.assertEqual(compose.call_args.args[:3],('exec','-T','backup'))
+            self.assertEqual([call.args[:3] for call in compose.call_args_list],[('stop','web'),('exec','-T','backup'),('start','web')])
+
+    def test_update_quiesces_only_running_writers_before_backup_and_migration(self):
+        with tempfile.TemporaryDirectory() as directory,patch.object(server,'STATE',Path(directory)):
+            values=server.server_host.shared_values({'COMPOSE_PROJECT_NAME':'own','INSTANCE_ID':'synthetic','PUBLIC_URL':'https://example.test'})
+            server.write_env(values)
+            running=[{'State':{'Running':name!='indexer'},'Config':{'Labels':{'com.docker.compose.service':name}}} for name in ['web','mail','indexer','backup','db']]
+            with patch('server.preflight',return_value=(running,{'cpus':2,'memory_mib':3392})),patch('server.compose') as compose,patch('server.backup_key'),patch('server.verify_local'),patch('builtins.print'):
+                server.run(argparse.Namespace(command='update',no_build=True,release=None))
+            calls=[call.args for call in compose.call_args_list]
+            self.assertEqual(calls[0],('stop','web','mail'))
+            self.assertEqual(calls[1][:3],('exec','-T','backup'))
+            self.assertEqual(calls[2],('up','--detach','--wait','--wait-timeout','600'))
+            self.assertEqual(calls[3],('exec','-T','mail','python','backend/manage.py','check_smtp'))
+            self.assertEqual(len(calls),4)
+
+    def test_migration_failure_does_not_restart_old_writers_over_changed_schema(self):
+        with tempfile.TemporaryDirectory() as directory,patch.object(server,'STATE',Path(directory)):
+            values=server.server_host.shared_values({'COMPOSE_PROJECT_NAME':'own','INSTANCE_ID':'synthetic','PUBLIC_URL':'https://example.test'})
+            server.write_env(values)
+            running=[{'State':{'Running':True},'Config':{'Labels':{'com.docker.compose.service':name}}} for name in ['web','mail','indexer']]
+            def action(*args,**kwargs):
+                if args[0]=='up':raise RuntimeError('synthetic migration failure')
+                return Mock()
+            with patch('server.preflight',return_value=(running,{'cpus':2,'memory_mib':3392})),patch('server.compose',side_effect=action) as compose,patch('server.backup_key'),patch('server.verify_local') as verify,patch('builtins.print'):
+                with self.assertRaisesRegex(RuntimeError,'migration failure'):
+                    server.run(argparse.Namespace(command='update',no_build=True,release=None))
+            calls=[call.args for call in compose.call_args_list]
+            self.assertEqual(calls[0],('stop','web','mail','indexer'))
+            self.assertEqual(calls[1][:3],('exec','-T','backup'))
+            self.assertEqual(calls[2][0],'up')
+            self.assertFalse(any(call[0]=='start' for call in calls));verify.assert_not_called()
 
 
 class S3Tests(unittest.TestCase):

@@ -198,8 +198,17 @@ def run(args):
         print('Лимиты служб: '+str(budget['cpus'])+' CPU, '+str(budget['memory_mib'])+' МиБ памяти (сумма верхних границ).',flush=True)
         if args.command=='doctor':return
         if require_build:server_host.build_images(docker,values,ROOT)
-        if args.command=='update' and any(item.get('State',{}).get('Running') and (item.get('Config',{}).get('Labels') or {}).get('com.docker.compose.service')=='web' for item in containers):
-            compose('exec','-T','backup','python','-c',BACKUP_BEFORE_UPDATE_CODE)
+        writers=[name for name in ('web','mail','indexer') if any(
+            item.get('State',{}).get('Running') and (item.get('Config',{}).get('Labels') or {}).get('com.docker.compose.service')==name
+            for item in containers)] if args.command=='update' else []
+        if writers:
+            # Keep the data snapshot and backfill free from writes by the old application.
+            compose('stop',*writers)
+            try:compose('exec','-T','backup','python','-c',BACKUP_BEFORE_UPDATE_CODE)
+            except BaseException:
+                # No configuration or schema change yet: resume the exact old containers.
+                compose('start',*writers)
+                raise
         write_env(values)
         backup_key(values)
         # Migrate only this checkout's former edge; never touch another project's proxy.
