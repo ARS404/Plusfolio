@@ -14,9 +14,10 @@ jobs:
   publish:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/plusfolio-docker
     steps:
+      - name: Set isolated Docker configuration
+        run: |
+          printf 'DOCKER_CONFIG=%s/plusfolio-docker\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - name: Authenticate to Yandex Cloud Registry
         env:
@@ -49,4 +50,4 @@ jobs:
           path: ${{ runner.temp }}/images.json
       - name: Remove temporary registry credentials
         if: always()
-        run: rm -f "$DOCKER_CONFIG/config.json"
+        run: rm -f "$RUNNER_TEMP/plusfolio-docker/config.json"
