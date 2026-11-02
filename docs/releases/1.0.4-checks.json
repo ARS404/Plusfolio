@@ -1,0 +1,66 @@
+{
+  "version": "1.0.4",
+  "date": "2026-11-02",
+  "scope": "Local verification before the release commit and tag; CI status is separate",
+  "release_status": "released",
+  "release_tag": "v1.0.4",
+  "source_base_revision": "11b0a01ec7db656ecb2d5614dcb1f402216df1cc",
+  "current_checks": {
+    "version_and_frontend_mirrors": "synchronized",
+    "expected_tag_validation": "v1.0.4 passed",
+    "targeted_backend": {
+      "passed": 25,
+      "skipped": 0,
+      "modules": [
+        "test_release",
+        "test_student_profiles",
+        "test_api_reference",
+        "test_block_migration"
+      ]
+    },
+    "frontend_tests_passed": 38,
+    "production_build": "passed",
+    "main_js_kb": 380.36,
+    "math_js_kb": 261.06,
+    "largest_js_chunk_kb": 437.62,
+    "oversized_chunk_warning": false,
+    "deployment_helpers": {
+      "passed": 38,
+      "scope": "Unit tests for shared-host safeguards, capacity helpers, image updates and downloads; Docker calls mocked, temporary loopback port used"
+    },
+    "schema_drift": "No changes detected",
+    "migration_plan": "No planned migration operations",
+    "dependency_graph_vs_1_0_3": "unchanged",
+    "git_diff_check": "passed"
+  },
+  "data_compatibility": {
+    "new_migrations": [],
+    "last_core_migration": "0019_issue_edit_version",
+    "models_and_migration_files_vs_1_0_3": "unchanged",
+    "update_command": "python3 scripts/server.py update",
+    "update_behavior": "Stops running writers, takes fresh full backup, runs initialize and migrate before dependent services",
+    "manual_sql": "not required",
+    "cache_reset": "not required",
+    "live_database_migration_during_preparation": false
+  },
+  "recent_full_regression": {
+    "report": "../benchmarks/cleanup-student-profiles-2026-11-02.json",
+    "backend_total": 376,
+    "backend_passed": 372,
+    "backend_skipped": 4,
+    "frontend_passed_after_second_cleanup_pass": 38,
+    "deployment_helpers_passed": 38,
+    "reuse_reason": "Backend product code and dependencies unchanged since this full suite; release identity, API, profile scope and migration preservation checks repeated on 1.0.4"
+  },
+  "recent_browser_validation": {
+    "journal": "45px student rows, unique recipient counts, search and discussion filter",
+    "student_profile": "Own assignments only, participation dates, individual report 4/8 including discussed and 3/5 excluding them",
+    "formulas": "KaTeX renders from the separate math chunk",
+    "card_layout": "Insets match heading at 1280px and 390px; no horizontal overflow; count/date labels clarified"
+  },
+  "limitations": [
+    "Linux/Docker and PostgreSQL integration were not run locally during release preparation",
+    "Four PostgreSQL-only checks were skipped in the recent full SQLite regression",
+    "Local helper measurements are not production load or full-page latency measurements"
+  ]
+}

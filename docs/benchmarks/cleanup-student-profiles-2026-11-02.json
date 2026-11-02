@@ -1,0 +1,302 @@
+{
+  "date": "2026-11-02",
+  "comparison": "Before: uncommitted compact journal and student profile features at audit start. After: local cleanup; dependencies, version and behavior preserved.",
+  "backend": {
+    "environment": {
+      "python": "3.14.2",
+      "platform": "darwin",
+      "machine": "arm64"
+    },
+    "scope": "Synthetic temporary SQLite fixture; tracemalloc observes Python allocations, not process RSS, server capacity or page latency; fixture setup excluded",
+    "fixture": {
+      "students": 200,
+      "circles": 21,
+      "issues": 84,
+      "tasks": 120,
+      "primary_student_history_periods": 1600,
+      "assignments": 884,
+      "solves": 8000
+    },
+    "identical_report_scenarios": 24,
+    "identical_profile_roles": 4,
+    "identical_journal_snapshots": 1,
+    "measurements": {
+      "profile": {
+        "before": {
+          "queries": 4,
+          "median_ms": 37.353,
+          "peak_python_bytes": 908099,
+          "samples": 5
+        },
+        "after": {
+          "queries": 4,
+          "median_ms": 36.841,
+          "peak_python_bytes": 692594,
+          "samples": 5
+        }
+      },
+      "journal": {
+        "before": {
+          "queries": 8,
+          "median_ms": 150.516,
+          "peak_python_bytes": 5114368,
+          "samples": 5
+        },
+        "after": {
+          "queries": 8,
+          "median_ms": 129.528,
+          "peak_python_bytes": 4713512,
+          "samples": 5
+        }
+      },
+      "student_analytics_0": {
+        "before": {
+          "queries": 16,
+          "median_ms": 75.475,
+          "peak_python_bytes": 941688,
+          "samples": 5
+        },
+        "after": {
+          "queries": 15,
+          "median_ms": 74.51,
+          "peak_python_bytes": 941042,
+          "samples": 5
+        }
+      },
+      "student_analytics_1": {
+        "before": {
+          "queries": 16,
+          "median_ms": 72.956,
+          "peak_python_bytes": 946732,
+          "samples": 5
+        },
+        "after": {
+          "queries": 15,
+          "median_ms": 70.862,
+          "peak_python_bytes": 945412,
+          "samples": 5
+        }
+      }
+    }
+  },
+  "frontend": {
+    "environment": {
+      "node": "v26.3.1",
+      "platform": "darwin",
+      "arch": "arm64"
+    },
+    "scope": "Synthetic pure helper benchmark; Set allocation/add counts are instrumented, not JavaScript heap/RSS measurements",
+    "fixture": {
+      "students": 200,
+      "unique_tasks": 400,
+      "blocks": 30,
+      "state_rows": 80000
+    },
+    "scenarios": {
+      "uniform": {
+        "before": {
+          "median_ms": 28.040180666666668,
+          "samples": 7,
+          "calls_per_sample": 3,
+          "set_instances": 401,
+          "set_add_calls": 2400200
+        },
+        "after": {
+          "median_ms": 7.121055666666659,
+          "samples": 7,
+          "calls_per_sample": 3,
+          "set_instances": 31,
+          "set_add_calls": 6200
+        }
+      },
+      "overlapping": {
+        "before": {
+          "median_ms": 23.772694333333373,
+          "samples": 7,
+          "calls_per_sample": 3,
+          "set_instances": 401,
+          "set_add_calls": 1920200
+        },
+        "after": {
+          "median_ms": 6.956930666666646,
+          "samples": 7,
+          "calls_per_sample": 3,
+          "set_instances": 32,
+          "set_add_calls": 5320
+        }
+      }
+    },
+    "identical_scenarios": 22,
+    "retention": "Only cohorts referenced by task results and the current block unions remain live; no cache retains all historical cohorts"
+  },
+  "build": {
+    "scope": "Built JavaScript chunk sizes in decimal kB; CSS, fonts and PDF worker asset are separate. Splitting keeps the math library independently cacheable and removes the oversized main chunk warning; both main and math still load initially.",
+    "before_main_kb": 642.61,
+    "after_main_kb": 380.33,
+    "math_kb": 261.06,
+    "before_all_js_chunks_kb": 1150.26,
+    "after_all_js_chunks_kb": 1149.15,
+    "largest_js_chunk_kb": 437.62,
+    "oversized_warning": false,
+    "final_chunks": {
+      "shield-check-CZa36_AL.js": 0.47,
+      "DocumentationPage-wBEoszX6.js": 12.47,
+      "ApiReferencePage-B-Ynh0jz.js": 17.54,
+      "AnalyticsReport-0WkQsetw.js": 19.29,
+      "AccountPage-C9m76ihb.js": 20.37,
+      "math-uLN8M5ZI.js": 261.06,
+      "index-CG_fV3Cy.js": 380.33,
+      "pdf-CfhDiWmk.js": 437.62
+    }
+  },
+  "verification": {
+    "backend": {
+      "total": 376,
+      "passed": 372,
+      "skipped": 4,
+      "seconds": 224.609,
+      "skips": "PostgreSQL-only checks; SQLite local regression"
+    },
+    "frontend_passed": 38,
+    "deployment_helpers_passed": 38,
+    "typescript_no_unused": "passed",
+    "python_static_scan": {
+      "parsed_python_files": 135,
+      "unused_import_candidates": []
+    },
+    "production_build": "passed without oversized chunk warning",
+    "migration_drift": "No changes detected",
+    "browser": {
+      "production_index_chunk": "index-CG_fV3Cy.js",
+      "production_math_chunk": "math-uLN8M5ZI.js",
+      "rendered_katex_formulas": 1,
+      "student_row_heights_px": [
+        45,
+        45,
+        45
+      ],
+      "table_width_px": 1062,
+      "search_progress": "10/12 -> 1/1",
+      "hidden_discussed_summary": "3 solved / 5 total",
+      "student_report_with_discussed": "4/8",
+      "student_report_without_discussed": "3/5 (60%)",
+      "console_errors": 0,
+      "restored": "Teacher, original Vite journal URL, search cleared and discussion filter off",
+      "final_production_smoke": "Fresh index and math chunks loaded; 10/12 task progress, no console errors"
+    },
+    "learning_tables_unchanged_in_both_local_databases": true
+  },
+  "cache_checks": {
+    "main": {
+      "pdf": {
+        "files": 30,
+        "bytes": 1152023,
+        "removed": 0,
+        "max_bytes": 134217728,
+        "max_files": 256,
+        "max_age_seconds": 604800
+      },
+      "toolchains": {
+        "files": 2,
+        "bytes": 26798226,
+        "removed": 0,
+        "max_bytes": 134217728,
+        "max_files": 2,
+        "max_age_seconds": 1209600
+      },
+      "abandoned_jobs": {
+        "removed": 0
+      },
+      "abandoned_previews": {
+        "removed": 0
+      },
+      "trusted_resources": {
+        "files": 465,
+        "bytes": 49249496,
+        "policy": "read-only during document compilation; never evicted"
+      }
+    },
+    "staging": {
+      "pdf": {
+        "files": 0,
+        "bytes": 0,
+        "removed": 0,
+        "max_bytes": 134217728,
+        "max_files": 256,
+        "max_age_seconds": 604800
+      },
+      "toolchains": {
+        "files": 0,
+        "bytes": 0,
+        "removed": 0,
+        "max_bytes": 134217728,
+        "max_files": 2,
+        "max_age_seconds": 1209600
+      },
+      "abandoned_jobs": {
+        "removed": 0
+      },
+      "abandoned_previews": {
+        "removed": 0
+      },
+      "trusted_resources": {
+        "files": 465,
+        "bytes": 49249496,
+        "policy": "read-only during document compilation; never evicted"
+      }
+    },
+    "preview": {
+      "pdf": {
+        "files": 0,
+        "bytes": 0,
+        "removed": 0,
+        "max_bytes": 134217728,
+        "max_files": 256,
+        "max_age_seconds": 604800
+      },
+      "toolchains": {
+        "files": 0,
+        "bytes": 0,
+        "removed": 0,
+        "max_bytes": 134217728,
+        "max_files": 2,
+        "max_age_seconds": 1209600
+      },
+      "abandoned_jobs": {
+        "removed": 0
+      },
+      "abandoned_previews": {
+        "removed": 0
+      },
+      "trusted_resources": {
+        "files": 465,
+        "bytes": 49249496,
+        "policy": "read-only during document compilation; never evicted"
+      }
+    }
+  },
+  "disk_cleanup": {
+    "staging_test_pdf_cache": {
+      "removed_artifacts": 0,
+      "freed_bytes": 0
+    },
+    "preserved": [
+      "canonical production build",
+      "active Vite cache",
+      "runtime databases and backups",
+      "dependencies and environments",
+      "shared TeX binary and trusted resources",
+      "warm canonical PDF and toolchain caches"
+    ],
+    "abandoned_jobs": "See cache checks; active job locks are respected",
+    "snapshots": "Only originals of changed sources retained; frontend test copy retained after the second pass added a regression test"
+  },
+  "limits": [
+    "Synthetic local measurements are not process RSS, full-page latency or a production load test",
+    "Final benchmark runs followed completion of the regression suite; the workstation was not otherwise isolated",
+    "Full Linux/Docker and PostgreSQL integration not run in this local cleanup; PostgreSQL-only tests skipped",
+    "TeX compiler code unchanged; bounded cache maintenance preserves trusted resources and active jobs"
+  ],
+  "version": "1.0.3 unchanged",
+  "git": "No commit, tag or push"
+}

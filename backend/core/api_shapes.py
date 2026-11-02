@@ -166,7 +166,7 @@ SCHEMAS={
  'JournalBlock':record('Блок листка в журнале',{
     'issue_id':number('ID выдачи.'),'issued_on':DATE,'number':number('Номер выдачи в кружке.'),
     'worksheet':record('Листок блока',{'id':UUID,'public_id':text(),'title':text(),'description':text(),**FILES},['id','public_id','title','description']),
-    'problems':array(ref('Problem'))},['issue_id','issued_on','number','worksheet','problems']),
+    'problems':array(ref('Problem')),'recipient_ids':array(number(),'Только при show_group_stats=true: текущие строки школьников, получивших эту выдачу. При объединении выдач получателей одной задачи считайте без повторов.')},['issue_id','issued_on','number','worksheet','problems']),
  'Journal':record('Журнал кружка',{
     'circle':record('Кружок журнала',{'id':UUID,'public_id':text(),'name':text()},['id','public_id','name']),
     'blocks':array(ref('JournalBlock'),'Задачи сгруппированы по выданным листкам.'),
@@ -222,8 +222,14 @@ SCHEMAS['WorksheetProgress']=record('Прогресс листка',{
  'assigned':number('Назначенные пары школьник × задача.'),'solved':number(),'percent':PERCENT,
  'completed_recipients':number('Получатели, решившие все задачи этой версии, независимо от фильтра.'),'full_percent':PERCENT,
  'circle_count':number(),'issue_count':number()},['id','public_id','title','recipients','problem_count','total_problem_count','assigned','solved','percent','completed_recipients','full_percent','circle_count','issue_count'])
+SCHEMAS['StudentProfile']=record('Страница школьника',{
+ 'id':number('ID школьника.'),'public_id':text('S-ID.'),'user_public_id':text('U-ID.'),'name':text('ФИО.'),**EDUCATION,
+ 'circles':array(record('Участие в доступном кружке',{'id':UUID,'public_id':text('C-ID.'),'name':text(),'city':text(),
+    'archived':boolean(),'active':boolean('Есть действующий период участия.'),'issue_count':number('Число назначенных выдач этого кружка.'),
+    'periods':array(record('Период участия',{'joined_at':DATETIME,'left_at':nullable(DATETIME)}))}))})
+
 SCHEMAS['Analytics']=record('Аналитический отчёт',{
- 'include_discussed':boolean('Включены разобранные задачи.'),'personal_only':boolean('В отчёте только личные назначения и результаты.'),'assigned_pairs':number('Уникальные назначенные пары школьник × задача.'),
+ 'subject_student_id':number('ID школьника в отчёте /students/{student_id}/analytics; отсутствует в общем отчёте.'),'include_discussed':boolean('Включены разобранные задачи.'),'personal_only':boolean('В отчёте только личные назначения и результаты.'),'assigned_pairs':number('Уникальные назначенные пары школьник × задача.'),
  'solved_pairs':number('Решённые пары выбранного среза.'),'percent':PERCENT,'student_count':number(),'problem_count':number(),
  'rows':array(ref('ProblemProgress')),
  'counts':record('Сводные показатели',{
@@ -338,7 +344,7 @@ RESPONSES={
  'accountGet':ref('Account'),'accountUpdate':ref('Account'),
  'circleList':array(ref('Circle')),'circleCreate':ref('Circle'),'circleGet':ref('Circle'),'circleUpdate':ref('Circle'),
  'memberList':array(ref('Member')),'memberAdd':array(ref('Member')),'memberRemove':array(ref('Member')),
- 'studentSearch':array(ref('StudentSearch')),'studentUpdate':ref('StudentUpdated'),'teacherAdd':ref('Circle'),'teacherRemove':ref('Circle'),
+ 'studentProfile':ref('StudentProfile'),'studentAnalytics':ref('Analytics'),'studentSearch':array(ref('StudentSearch')),'studentUpdate':ref('StudentUpdated'),'teacherAdd':ref('Circle'),'teacherRemove':ref('Circle'),
  'issueList':array(ref('Issue')),'issueCreate':array(ref('Issue')),'issueGet':ref('IssueDetail'),
  'issueUpdate':ref('IssueDetail'),'issueEditOptions':ref('IssueEditOptions'),
  'journalGet':ref('Journal'),'journalIssueGet':ref('JournalIssue'),

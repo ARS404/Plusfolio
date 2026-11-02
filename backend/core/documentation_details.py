@@ -247,6 +247,7 @@ PROCEDURES = {
 
 
 SECTION_OPERATIONS = {
+ 'student-profile':['studentProfile','studentAnalytics'],
  'robot-tex-build':['texToolchain','texToolchainArchive'],
  'robot-required-rules':['documentationGet','accountGet','openapiGet'],
  'robot-worksheet-upload':['texToolchain','texToolchainArchive','problemSearchText','materialCreate','materialGet','materialList','topicList','topicCreate','tagList','tagCreate','worksheetGet','accountGet'],

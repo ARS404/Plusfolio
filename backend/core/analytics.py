@@ -14,8 +14,8 @@ def percent(numerator, denominator):
     return round(100 * numerator / denominator, 1) if denominator else None
 
 
-def scoped_assignments(user, params):
-    circles = s.circles_for(user)
+def scoped_assignments(user, params, *, student=None):
+    circles = s.group_circles_for(user) if student is not None else s.circles_for(user)
     selected_circles = f.uuid_ids(f.query_values(params, 'circle'))
     if selected_circles is not None:
         if set(str(pk) for pk in circles.filter(pk__in=selected_circles).values_list('pk', flat=True)) != selected_circles:
@@ -24,7 +24,7 @@ def scoped_assignments(user, params):
     cities = f.query_values(params, 'city')
     circles = f.by_city(circles, cities)
     readable = set(circles.values_list('pk', flat=True))
-    if s.admin(user):
+    if s.admin(user) or student is not None:
         group_ids = readable
     else:
         group_ids = set()
@@ -32,12 +32,13 @@ def scoped_assignments(user, params):
             group_ids.update(CircleTeacher.objects.filter(circle_id__in=readable, teacher__user=user, ended_at=None).values_list('circle_id', flat=True))
         group_ids.update(s.analyst_circles_for(user).filter(pk__in=readable).values_list('pk', flat=True))
     allowed = Q(issue__circle_id__in=group_ids)
-    if 'student' in user.roles:
+    if student is None and 'student' in user.roles:
         personal = Q(student__user=user)
         if selected_circles is not None:
             personal &= Q(issue__circle_id__in=readable)
         allowed |= personal
     assignments = f.by_city(Assignment.objects.filter(allowed), cities, 'issue__circle__city')
+    if student is not None:assignments=assignments.filter(student=student)
     assignments = f.by_tags(assignments, f.query_values(params, 'worksheet_tag'), 'worksheet', 'issue__worksheet__tags')
     problems = f.by_tags(Problem.objects.all(), f.query_values(params, 'problem_tag'), 'problem')
     topic_ids = s.topic_ids_in_branch(f.query_values(params, 'topic'))
@@ -72,11 +73,11 @@ def _completed_recipients(recipients,requirements,solved):
     return len(complete)
 
 
-def report(user, params):
+def report(user, params, *, student=None):
     include=params.get('include_discussed','1')
     if include not in {'0','1'}:raise ValidationError('include_discussed: 0 или 1.')
     include_discussed=include=='1'
-    assignments, selected_problems, group_ids = scoped_assignments(user, params)
+    assignments, selected_problems, group_ids = scoped_assignments(user, params, student=student)
     # Read issue metadata once, rather than repeating two UUIDs for every pupil.
     issues = {iid:(wid,cid) for iid,wid,cid in WorksheetIssue.objects.filter(
         pk__in=assignments.values('issue_id')).values_list('pk','worksheet_id','circle_id')}
@@ -242,6 +243,7 @@ def report(user, params):
                       'visible': visible, 'percent': percent(discussed, denominator)}
 
     return {
+        **({'subject_student_id':student.pk} if student is not None else {}),
         'include_discussed':include_discussed,'personal_only': not bool(group_ids), 'assigned_pairs': assigned_count, 'solved_pairs': solved_count,
         'percent': percent(solved_count, assigned_count), 'student_count': len(student_ids), 'problem_count': len(problems), 'rows': rows,
         'counts': {'remaining_pairs': assigned_count-solved_count,'available_pairs':available_count,'discussed_unsolved_pairs':blocked_count, 'worksheet_count': len(worksheet_rows), 'issue_count': len(issue_ids),

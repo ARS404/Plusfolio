@@ -158,6 +158,17 @@ def student_detail(request,pk,student_id):
     student=s.update_student(request.user,circle,student_id,request.data)
     return Response({'id':student.pk,'public_id':public_id('student',student.pk),**student.education_info()})
 
+@api_view(['GET'])
+def student_profile(request,student_id):
+    from .student_profiles import profile,subject
+    return Response(profile(request.user,subject(request.user,student_id)))
+
+@api_view(['GET'])
+def student_analytics(request,student_id):
+    from .analytics import report
+    from .student_profiles import subject
+    return Response(report(request.user,request.query_params,student=subject(request.user,student_id)))
+
 @api_view(['POST','DELETE'])
 def teachers(request,pk):
     circle=s.get_circle(request.user,pk)

@@ -57,6 +57,9 @@ def operation(id, summary, access='all', *, body=None, example=None, parameters=
 
 
 # Django converters and view argument names are part of the same registry as the schema.
+ANALYTICS_PARAMETERS = [query('circle','UUID кружка.',multiple=True,schema=UUID),CITY,TOPIC,query('problem_tag','Числовой ID тега задач.',multiple=True,schema=INT),query('worksheet_tag','Числовой ID тега листков.',multiple=True,schema=INT),query('include_discussed','1 — учитывать разобранные задачи (по умолчанию); 0 — исключать их в контексте выдачи. Общая пара остаётся, если задача ещё не разобрана хотя бы в одном выбранном кружке получателя.',schema={'enum':['0','1'],'default':'1'})]
+
+
 ROUTES = [
  ('images','image_assets.upload',{'POST':operation('imageUpload','Загрузить неизменяемый PNG/JPEG','all',body=obj({'data':{'type':'string','contentEncoding':'base64','maxLength':2796218}},['data']),status=201,description='PNG/JPEG до 2 МиБ и 16 мегапикселей. Возвращает id для images и команды \\pfimage{id}. Поддерживается также multipart file. До 50 МиБ на аккаунт; сохранённые редакции сохраняют рисунки.')}),
  ('images/<uuid:pk>','image_assets.image',{'GET':operation('imageGet','Прочитать доступный рисунок',binary=True,parameters=[query('circle','Контекст доступа к решению.',schema=UUID)],description='Доступ определяется условием, решением или текстовым блоком, где используется рисунок. Закрытые решения не раскрываются по прямому URL.')}),
@@ -97,6 +100,8 @@ ROUTES = [
     'POST': operation('memberAdd', 'Зачислить зарегистрированного школьника', 'writer', body=obj({'email': {'type':'string','format':'email'},'student_id': INT}),
         example={'student_id': 12}, description='Укажите либо email, либо числовой student_id из поиска. Автоматически назначаются все прошлые выдачи.'),
     'DELETE': operation('memberRemove', 'Завершить участие школьника', 'writer', body=obj({'email': {'type':'string','format':'email'}}, ['email']), example={'email':'student@example.ru'})}),
+ ('students/<int:student_id>','api.student_profile',{'GET':operation('studentProfile','Информация и участие школьника в доступных кружках','group',description='Преподаватель и аналитик видят только свои области групповой аналитики; администратор — все. Собственная роль школьника не расширяет эту область. Контакты и закрытые кружки не возвращаются.')}),
+ ('students/<int:student_id>/analytics','api.student_analytics',{'GET':operation('studentAnalytics','Аналитика выбранного школьника','group',parameters=ANALYTICS_PARAMETERS,description='Все таблицы, итоги и закрытие листков рассчитываются только по назначениям этого школьника в доступных взрослой роли кружках. Учитываются темы, теги, города и галочка разобранных задач.')}),
  ('circles/<uuid:pk>/student-search', 'api.student_search', {'GET': operation('studentSearch', 'Найти школьника для зачисления', 'writer', parameters=[Q],
     description='ФИО, S-ID или U-ID; число без префикса — ID школьника. До 20 записей с маской email.')}),
  ('circles/<uuid:pk>/members/<int:student_id>', 'api.student_detail', {'PATCH': operation('studentUpdate', 'Исправить год выпуска школьника своего кружка', 'writer',
@@ -143,7 +148,7 @@ ROUTES = [
  ('tags', 'api.tags', {
     'GET': operation('tagList', 'Теги всех трёх справочников',parameters=[Q]),
     'POST': operation('tagCreate', 'Создать тег', 'admin',body=obj({'kind':{'enum':['problem','worksheet','circle']},'name':STRING},['kind','name']),example={'kind':'worksheet','name':'Домашняя работа'},status=201)}),
- ('analytics', 'api.analytics', {'GET': operation('analyticsGet', 'Личный или групповой отчёт в пределах доступа',parameters=[query('circle','UUID кружка.',multiple=True,schema=UUID),CITY,TOPIC,query('problem_tag','Числовой ID тега задач.',multiple=True,schema=INT),query('worksheet_tag','Числовой ID тега листков.',multiple=True,schema=INT),query('include_discussed','1 — учитывать разобранные задачи (по умолчанию); 0 — исключать их в контексте выдачи. Общая пара остаётся, если задача ещё не разобрана хотя бы в одном выбранном кружке получателя.',schema={'enum':['0','1'],'default':'1'})],
+ ('analytics', 'api.analytics', {'GET': operation('analyticsGet', 'Личный или групповой отчёт в пределах доступа',parameters=ANALYTICS_PARAMETERS,
     description='Текущее состояние уникальных пар школьник × задача. Для student — только личные данные, если другие роли не дают более широкого доступа.')}),
  ('invitations', 'api.invitations', {
     'GET': operation('invitationList', 'Мои приглашения; у администратора — все', 'inviter',parameters=[Q]),

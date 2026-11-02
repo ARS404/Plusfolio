@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {journalView,journalTotals,journalStudentSummary} from '../src/journalView.ts';
+import {journalView,journalTotals,journalStudentSummary,journalProblemProgress} from '../src/journalView.ts';
 
 const blocks=[
  {issue_id:3,issued_on:'2026-10-22',problems:[{id:'a'},{id:'b'},{id:'c'}]},
@@ -70,4 +70,36 @@ test('summary partitions selected unique tasks into solved, available and discus
  assert.deepEqual(journalStudentSummary(journalTotals(slice,marks,discussions),2),{solved:0,available:2,discussedUnsolved:2,total:4});
  const hidden=journalView(slice,discussions,true,'oldest');
  assert.deepEqual(journalStudentSummary(journalTotals(hidden,marks,discussions),1),{solved:1,available:1,discussedUnsolved:0,total:2});
+});
+
+test('task progress unions recipients across selected issues and ignores solves from nonrecipients',()=>{
+ const slice=[
+  {issue_id:1,issued_on:'2026-01-01',recipient_ids:[1,2],problems:[{id:'a'},{id:'b'}]},
+  {issue_id:2,issued_on:'2026-02-01',recipient_ids:[2,3],problems:[{id:'a'}]},
+ ];
+ const states=new Map([['1:a',{solved:true}],['2:a',{solved:false}],['3:a',{solved:true}],['3:b',{solved:true}],['4:a',{solved:true}]]);
+ const progress=journalProblemProgress(slice,states,[1,2,3,4].map(id=>({id})));
+ assert.deepEqual(progress.get('a'),{solved:2,assigned:3,percent:200/3});
+ assert.deepEqual(progress.get('b'),{solved:0,assigned:2,percent:0});
+ assert.deepEqual(journalProblemProgress([slice[0]],states,[{id:2},{id:3}]).get('a'),{solved:0,assigned:1,percent:0});
+ assert.deepEqual(journalProblemProgress(slice,states,[{id:3}]).get('a'),{solved:1,assigned:1,percent:100});
+ assert.deepEqual(journalProblemProgress(slice,states,[]).get('a'),{solved:0,assigned:0,percent:null});
+ assert.deepEqual(slice[0].recipient_ids,[1,2]);
+});
+
+test('task progress follows hidden tasks and does not invent recipients without assignment metadata',()=>{
+ const slice=[{issue_id:1,issued_on:'2026-01-01',recipient_ids:[1],problems:[{id:'a'},{id:'b'}]}];
+ const visible=journalView(slice,[{problem_id:'a',discussed:true}],true,'oldest');
+ const progress=journalProblemProgress(visible,new Map(),[{id:1}]);
+ assert.equal(progress.has('a'),false);assert.equal(progress.get('b').assigned,1);
+ assert.deepEqual(journalProblemProgress(blocks,new Map(),[{id:1}]).get('a'),{solved:0,assigned:0,percent:null});
+});
+
+test('many different issue cohorts do not enlarge tasks confined to an earlier issue',()=>{
+ const slice=Array.from({length:100},(_,index)=>({issue_id:index+1,issued_on:'2026-01-01',recipient_ids:[index+1],problems:[{id:'shared'},...(index===0?[{id:'early'}]:[])]}));
+ const states=new Map(Array.from({length:100},(_,index)=>[(index+1)+':shared',{solved:true}]));
+ states.set('2:early',{solved:true});
+ const result=journalProblemProgress(slice,states,Array.from({length:100},(_,index)=>({id:index+1})));
+ assert.deepEqual(result.get('shared'),{solved:100,assigned:100,percent:100});
+ assert.deepEqual(result.get('early'),{solved:0,assigned:1,percent:0});
 });

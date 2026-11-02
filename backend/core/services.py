@@ -34,6 +34,13 @@ def circles_for(user):
 def analyst_circles_for(user):
     if 'analyst' not in user.roles: return Circle.objects.none()
     return Circle.objects.filter(Exists(Circle.tags.through.objects.filter(circle_id=OuterRef('pk'),tag_id__in=AnalystGrant.objects.filter(user=user).values('tag_id'))))
+def group_circles_for(user):
+    """Adult reporting scope, without circles accessible only as a pupil."""
+    if admin(user):return Circle.objects.all()
+    q=Q(pk__in=[])
+    if 'teacher' in user.roles:q|=Q(Exists(CircleTeacher.objects.filter(circle_id=OuterRef('pk'),teacher__user=user,ended_at=None)))
+    if 'analyst' in user.roles:q|=Q(pk__in=analyst_circles_for(user))
+    return Circle.objects.filter(q)
 def get_circle(user,pk,write=False):
     circle=circles_for(user).filter(pk=pk).first()
     if not circle: raise NotFound('Кружок недоступен.')

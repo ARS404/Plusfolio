@@ -41,6 +41,7 @@ urlpatterns=[
     path('api/circles',api.circles),path('api/circles/<uuid:pk>',api.circle_detail),
     path('api/circles/<uuid:pk>/members',api.members),path('api/circles/<uuid:pk>/members/<int:student_id>',api.student_detail),path('api/circles/<uuid:pk>/teachers',api.teachers),
     path('api/circles/<uuid:pk>/student-search',api.student_search),
+    path('api/students/<int:student_id>',api.student_profile),path('api/students/<int:student_id>/analytics',api.student_analytics),
     path('api/circles/<uuid:pk>/issues',api.issues),
     path('api/circles/<uuid:pk>/journal',api.journal),path('api/circles/<uuid:pk>/journal/export',api.journal_export),path('api/circles/<uuid:pk>/journal/<int:issue_id>',api.journal),
     path('api/circles/<uuid:pk>/problems/<uuid:problem_id>/<str:kind>',api.mark),
