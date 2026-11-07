@@ -15,7 +15,9 @@
       "seconds": 218.555,
       "suite": "core",
       "database": "isolated SQLite test database",
-      "environment": "An explicit image resource path was set, exercising fixture independence from it."
+      "environment": "An explicit image resource path was set, exercising fixture independence from it.",
+      "full_regression_revision": "105566b418f3b3a56d10cb19770e0e8dbf30d2d8",
+      "reuse_after_ui_refinement": "Backend, server scripts, schema and dependencies are unchanged from the full 383-test regression. Only journal/brand markup, CSS and release documentation were refined."
     },
     "image_resource_fixture": {
       "passed": 11,
@@ -23,7 +25,7 @@
     },
     "frontend_tests_passed": 38,
     "production_build": "passed",
-    "main_js_kb": 380.79,
+    "main_js_kb": 380.8,
     "math_js_kb": 261.06,
     "largest_js_chunk_kb": 437.62,
     "oversized_chunk_warning": false,
@@ -65,15 +67,32 @@
     "reuse_reason": "Every selected renderer source, document template, preparation script, documentation file and trusted resource has the identical hash. Release metadata and journal UI are outside the TeX contract."
   },
   "browser_validation": {
-    "task_columns_px": 48,
+    "task_columns_px": 44,
     "previous_task_columns_px": 74,
-    "progress_bar_px": 28,
+    "progress_bar_px": 24,
     "task_button_px": 28,
     "solve_button_px": 25,
     "name_display": "ID only; full title in native hover tooltip and task button accessible name",
     "open_solution": "Eye badge with hover/keyboard hint",
-    "worksheet_header_height": "unchanged after compacting PDF/TeX action padding",
-    "proof": "Local journal validated on 2026-11-07; no journal UI changes during release preparation."
+    "worksheet_header_height": "unchanged",
+    "proof": "Local journal checked on 2026-11-07 after final centering and 44px-column refinement.",
+    "icon_alignment": {
+      "previous_plus_horizontal_offset_px": 1.5,
+      "plus_svg_offset_px": {
+        "x": 0,
+        "y": 0
+      },
+      "logo_svg_offset_px": {
+        "x": 0,
+        "y": 0
+      },
+      "discussion_svg_offset_px": {
+        "x": 0,
+        "y": 0
+      },
+      "native_button_padding_removed": true,
+      "brand_mark": "Shared SVG component in sidebar, login and loading screen"
+    }
   },
   "resource_verification": {
     "report": "../benchmarks/tex-export-memory-2026-11-07.json",
@@ -85,5 +104,15 @@
     "Linux/Docker server build and PostgreSQL integration were not run locally: the existing plusfolio-check Colima profile is Broken. No VM repair was attempted.",
     "Four PostgreSQL-only checks are skipped in the SQLite suite. The repository CI checks the Linux server, HTTPS, SMTP, TeX and real backup restoration after publication.",
     "Local allocation measurements and short read-only production counter sampling are not a production load test."
-  ]
+  ],
+  "ui_refinement_checks": {
+    "frontend_tests_passed": 38,
+    "production_build": "passed",
+    "main_js_kb": 380.8,
+    "all_task_columns_px": 44,
+    "progress_bar_px": 24,
+    "click_targets_unchanged": true,
+    "source_release_revision_before_refinement": "105566b418f3b3a56d10cb19770e0e8dbf30d2d8",
+    "local_tag_updated_before_publication": true
+  }
 }
