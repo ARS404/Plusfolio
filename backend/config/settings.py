@@ -47,6 +47,7 @@ SECURE_CONTENT_TYPE_NOSNIFF=True
 EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend' if DEMO else 'core.mail_backend.EmailBackend'
 
 TEX_COMPILER=os.environ.get('PLUSFOLIO_TEX_COMPILER',str(LOCAL_DIR/'tools'/'tectonic'))
+TEX_RESOURCE_DIR=os.environ.get('PLUSFOLIO_TEX_RESOURCE_DIR') or None
 PDF_CACHE_MAX_BYTES=int(os.environ.get('PLUSFOLIO_PDF_CACHE_MIB','128'))*1024*1024
 PDF_CACHE_MAX_FILES=int(os.environ.get('PLUSFOLIO_PDF_CACHE_FILES','256'))
 PDF_CACHE_MAX_AGE=int(os.environ.get('PLUSFOLIO_PDF_CACHE_DAYS','7'))*86400

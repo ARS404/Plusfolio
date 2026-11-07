@@ -9,7 +9,9 @@
 @media(max-width:850px){.journal-export-bar{align-items:flex-start;flex-direction:column}.journal-download{align-self:flex-end}}@media(max-width:600px){.journal-controls .journal-toolbar{align-items:stretch}.journal-mode{width:100%}.journal-mode button{padding:10px 9px;font-size:10px;flex:1}.journal-download{align-self:stretch}.journal-download select{flex:1;min-width:0;width:auto}.journal-download .btn{min-width:115px}.journal-worksheet-picker{padding:10px}.journal-worksheet-picker label{width:100%;font-size:10px}.grouped-journal .student-col,.grouped-journal td:first-child{min-width:165px}}
 
 /* A circle can reveal solutions only after discussion. */
-.grouped-journal .solution-visibility-row td{background:#f7f9f4;padding:9px 8px;height:42px}.solution-visibility-row td:first-child{text-align:left;padding-left:20px;white-space:nowrap;font-size:10px;color:#7e9270}.solution-visibility-row td:first-child svg{vertical-align:middle;margin-right:7px}.solution-visibility-checkbox{appearance:auto;accent-color:var(--green);width:17px;height:17px;cursor:pointer;vertical-align:middle}.solution-visibility-checkbox:disabled{opacity:.35;cursor:default}.solution-open-hint{display:flex;justify-content:center;align-items:center;gap:3px;margin:6px auto 0;color:#63864d;font-size:8px;white-space:nowrap}
+.grouped-journal .solution-visibility-row td{background:#f7f9f4;padding:9px 8px;height:42px}.solution-visibility-row td:first-child{text-align:left;padding-left:20px;white-space:nowrap;font-size:10px;color:#7e9270}.solution-visibility-row td:first-child svg{vertical-align:middle;margin-right:7px}.solution-visibility-checkbox{appearance:auto;accent-color:var(--green);width:17px;height:17px;cursor:pointer;vertical-align:middle}.solution-visibility-checkbox:disabled{opacity:.35;cursor:default}.problem-number{position:relative}
+.solution-open-hint{position:absolute;top:-5px;right:-7px;display:grid;place-items:center;width:16px;height:16px;border:1px solid #d8e4d0;border-radius:50%;background:#eaf2e6;color:#63864d;pointer-events:none}
+.problem-number[data-solution-hint]:is(:hover,:focus-visible)::after{content:attr(data-solution-hint);position:absolute;z-index:5;top:calc(100% + 6px);right:-4px;width:136px;padding:6px 8px;border-radius:5px;background:#285d4b;color:white;font-size:10px;font-weight:400;line-height:1.4;white-space:normal;pointer-events:none}
 
 .student-grade{display:block;margin-top:7px;color:#71815f;font-size:11px;line-height:1.6}.student-editor-name{font-size:15px;font-weight:500}.person-row>div{min-width:0;overflow-wrap:anywhere}.person-row .icon-button{flex-shrink:0}@media(max-width:600px){.student-grade{font-size:9px}.person-row .icon-button{padding:7px}}
 
@@ -84,7 +86,7 @@
 
 /* Dense journal rows keep all four totals in one text line. */
 .grouped-journal .student-col{width:210px;padding-left:12px}
-.grouped-journal tbody td{padding:5px 4px;min-width:56px}
+.grouped-journal tbody td{padding:5px 3px;min-width:48px}
 .grouped-journal tbody td:first-child{min-width:210px;max-width:210px;padding:6px 12px;text-align:left}
 .grouped-journal .student-name{padding:0;font-size:11px;line-height:1.4}
 .grouped-journal .student-name-line{gap:3px 5px;flex-wrap:nowrap}
@@ -99,14 +101,15 @@
 .grouped-journal .solve-mark svg{width:16px;height:16px}
 .grouped-journal .worksheet-group{padding:8px 10px;height:auto;text-align:left;vertical-align:middle}
 .grouped-journal .worksheet-group b{display:block;font-size:11px;font-weight:500;white-space:normal;line-height:1.35}
-.grouped-journal .task-heading{min-width:62px;max-width:74px;padding:6px 4px;height:auto}
-.grouped-journal .column-hint{max-width:66px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;line-height:1.4;max-height:36px;margin-top:3px;margin-left:auto;margin-right:auto}
+.grouped-journal .worksheet-group .pdf-actions.compact .btn{padding:4px 5px;gap:5px}
+.grouped-journal .task-heading{width:48px;min-width:48px;max-width:48px;padding:6px 3px;height:auto}
+.grouped-journal .column-hint{max-width:40px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;line-height:1.4;max-height:36px;margin-top:3px;margin-left:auto;margin-right:auto}
 .grouped-journal .score-col{width:56px;min-width:56px!important;padding:5px 6px!important}
 .grouped-journal .score-value{font-size:12px}
 .grouped-journal .discussion-row td,.grouped-journal .solution-visibility-row td{height:30px;padding:3px 4px;font-size:9px}
 .grouped-journal .discussion-row td:first-child,.grouped-journal .solution-visibility-row td:first-child{padding-left:12px}
 .task-progress{display:flex;flex-direction:column;gap:3px;align-items:center;margin-top:4px;color:#5c7c4d;font-size:10px;font-variant-numeric:tabular-nums;font-weight:500}
-.task-progress>i{display:block;width:44px;height:3px;overflow:hidden;border-radius:2px;background:#e1e9da}
+.task-progress>i{display:block;width:28px;height:3px;overflow:hidden;border-radius:2px;background:#e1e9da}
 .task-progress>i>i{display:block;height:100%;background:#90ae79}
 .student-profile-heading{align-items:center}
 .student-profile-facts{display:flex;gap:24px;flex-wrap:wrap}

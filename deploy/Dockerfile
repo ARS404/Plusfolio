@@ -18,10 +18,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
  && rm -rf /var/lib/apt/lists/*
 COPY scripts/download_asset.py scripts/download_asset.py
 COPY scripts/setup_tex.py scripts/setup_tex.py
+COPY backend/core/__init__.py backend/core/tex_resources.py backend/core/
 COPY backend/core/tex_templates/ backend/core/tex_templates/
 RUN --mount=type=cache,id=plusfolio-tectonic-0.17.0-v33-blocks,target=/var/cache/plusfolio-tex,sharing=locked \
     PLUSFOLIO_TEX_SHARED_CACHE=/var/cache/plusfolio-tex python scripts/setup_tex.py \
- && chown -R 65532:65532 /app/.local
+ && mv /app/.local /app/tex-runtime \
+ && mkdir /app/.local \
+ && chown -R 65532:65532 /app/.local /app/tex-runtime
 
 COPY requirements.lock requirements-server.lock ./
 COPY scripts/download_asset.py scripts/install_locked.py scripts/
@@ -43,7 +46,9 @@ RUN mkdir -p /run/plusfolio-tex /backups /deployment \
  && chown 65532:65532 /run/plusfolio-tex /backups
 RUN printf 'plusfolio:x:65532:65532:Plusfolio:/tmp:/usr/sbin/nologin\n' >> /etc/passwd && printf 'plusfolio:x:65532:\n' >> /etc/group
 USER 65532:65532
-ENV PLUSFOLIO_DEMO=0
+ENV PLUSFOLIO_DEMO=0 \
+    PLUSFOLIO_TEX_RESOURCE_DIR=/app/tex-runtime/tectonic-cache \
+    PLUSFOLIO_TEX_COMPILER=/app/tex-runtime/tools/tectonic
 EXPOSE 8000
 CMD ["gunicorn", "--chdir", "backend", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--threads", "4", "--timeout", "60", "--access-logfile", "/dev/null", "--error-logfile", "-"]
 
@@ -65,8 +70,8 @@ COPY --from=prepared /usr/share/fonts /usr/share/fonts
 COPY --from=prepared /etc/fonts /etc/fonts
 COPY --from=prepared /usr/share/fontconfig /usr/share/fontconfig
 COPY --from=prepared /app/backend/core/tex_templates backend/core/tex_templates
-COPY --from=prepared /app/.local/tools .local/tools
-COPY --from=prepared /app/.local/tectonic-cache .local/tectonic-cache
+COPY --from=prepared /app/tex-runtime/tools .local/tools
+COPY --from=prepared /app/tex-runtime/tectonic-cache .local/tectonic-cache
 COPY scripts/tex_service.py scripts/tex_service.py
 COPY backend/core/tex_worker.py backend/core/tex_project.py backend/core/tex_runtime.py backend/core/
 RUN mkdir -p /run/plusfolio-tex && chown -R 65532:65532 /run/plusfolio-tex && chmod -R a+rX /app/.local

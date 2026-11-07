@@ -1,4 +1,5 @@
 import json,stat
+from pathlib import Path
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from core.tex_cache import pdf_cache,toolchain_cache
@@ -11,7 +12,7 @@ class Command(BaseCommand):
         from core.tex_runtime import prune_jobs
         report['abandoned_jobs']=prune_jobs(settings.LOCAL_DIR/'tex-jobs')
         report['abandoned_previews']=prune_jobs(settings.BASE_DIR/'.local/tex-previews')
-        resources=settings.LOCAL_DIR/'tectonic-cache'
+        resources=Path(getattr(settings,'TEX_RESOURCE_DIR',None) or settings.LOCAL_DIR/'tectonic-cache')
         files=size=0
         for path in resources.rglob('*'):
             try:info=path.lstat()

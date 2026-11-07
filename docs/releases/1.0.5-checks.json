@@ -1,0 +1,89 @@
+{
+  "version": "1.0.5",
+  "date": "2026-11-07",
+  "scope": "Local verification before the release commit and tag; publication and CI are separate",
+  "release_status": "released",
+  "release_tag": "v1.0.5",
+  "source_base_revision": "eb4ed6b43524d8914a1cd17fc4610c9dd083ef74",
+  "current_checks": {
+    "version_and_frontend_mirrors": "synchronized",
+    "expected_tag_validation": "v1.0.5 passed",
+    "backend": {
+      "total": 383,
+      "passed": 379,
+      "skipped": 4,
+      "seconds": 218.555,
+      "suite": "core",
+      "database": "isolated SQLite test database",
+      "environment": "An explicit image resource path was set, exercising fixture independence from it."
+    },
+    "image_resource_fixture": {
+      "passed": 11,
+      "regression": "Four fixture failures with an inherited image cache path were reproduced and resolved by isolating the portable test class."
+    },
+    "frontend_tests_passed": 38,
+    "production_build": "passed",
+    "main_js_kb": 380.79,
+    "math_js_kb": 261.06,
+    "largest_js_chunk_kb": 437.62,
+    "oversized_chunk_warning": false,
+    "deployment_helpers": {
+      "passed": 43,
+      "scope": "Shared-host safeguards, retention/restore, capacity helpers, immutable images, storage paths and downloads; Docker calls mocked, temporary loopback port used"
+    },
+    "schema_drift": "No changes detected",
+    "migration_plan": "No planned migration operations",
+    "dependency_graph_vs_1_0_4": "unchanged",
+    "git_diff_check": "passed"
+  },
+  "data_compatibility": {
+    "new_migrations": [],
+    "last_core_migration": "0019_issue_edit_version",
+    "models_and_migration_files_vs_1_0_4": "unchanged",
+    "manual_sql": "not required",
+    "volume_removal": "not required",
+    "backup_restore_paths": "source/.local/... unchanged",
+    "update_command": "python3 scripts/server.py update",
+    "required_images": [
+      "application",
+      "compiler"
+    ],
+    "live_database_migration_during_preparation": false
+  },
+  "tex_package": {
+    "contract_id": "b0b84369abcf1bc2c4c33cee9a9e09bf623be249be1108b5c4989723e0bc456d",
+    "source_and_resource_files": 486,
+    "all_archive_hashes_match": true,
+    "unchanged_from_verified_2026_11_07_package": true,
+    "prior_prepare_runs": 2,
+    "prior_real_pdf_variants": [
+      "statement",
+      "with-solutions"
+    ],
+    "prior_rendered_pages_reviewed": 7,
+    "compiler": "Tectonic 0.17.0",
+    "reuse_reason": "Every selected renderer source, document template, preparation script, documentation file and trusted resource has the identical hash. Release metadata and journal UI are outside the TeX contract."
+  },
+  "browser_validation": {
+    "task_columns_px": 48,
+    "previous_task_columns_px": 74,
+    "progress_bar_px": 28,
+    "task_button_px": 28,
+    "solve_button_px": 25,
+    "name_display": "ID only; full title in native hover tooltip and task button accessible name",
+    "open_solution": "Eye badge with hover/keyboard hint",
+    "worksheet_header_height": "unchanged after compacting PDF/TeX action padding",
+    "proof": "Local journal validated on 2026-11-07; no journal UI changes during release preparation."
+  },
+  "resource_verification": {
+    "report": "../benchmarks/tex-export-memory-2026-11-07.json",
+    "production_measurement": "Read-only counters from three samples; no production load, restart or deployment",
+    "export_measurement": "Local 48 streamed downloads at concurrency 8; retained Python allocation delta about 31 KiB, additional concurrency peak about 11 MiB",
+    "production_ssh_rules_restored": true
+  },
+  "limitations": [
+    "Linux/Docker server build and PostgreSQL integration were not run locally: the existing plusfolio-check Colima profile is Broken. No VM repair was attempted.",
+    "Four PostgreSQL-only checks are skipped in the SQLite suite. The repository CI checks the Linux server, HTTPS, SMTP, TeX and real backup restoration after publication.",
+    "Local allocation measurements and short read-only production counter sampling are not a production load test."
+  ]
+}

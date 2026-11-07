@@ -133,7 +133,7 @@ class CompilerUnavailable(APIException):
 
 
 def compiler_environment():
-    cache=settings.LOCAL_DIR/'tectonic-cache';config=settings.LOCAL_DIR/'tectonic-config'
+    cache=Path(getattr(settings,'TEX_RESOURCE_DIR',None) or settings.LOCAL_DIR/'tectonic-cache');config=settings.LOCAL_DIR/'tectonic-config'
     cache.mkdir(mode=0o700,exist_ok=True);config.mkdir(mode=0o700,exist_ok=True)
     return {'PATH':'/usr/bin:/bin','LANG':'en_US.UTF-8','TECTONIC_CACHE_DIR':str(cache),
             'XDG_CONFIG_HOME':str(config),'TECTONIC_UNTRUSTED_MODE':'1'}

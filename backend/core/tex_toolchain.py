@@ -8,11 +8,12 @@ from pathlib import Path
 import zipfile
 from django.conf import settings
 from .documents import TEMPLATE, CompilerUnavailable
+from .tex_resources import CACHE_PREFIX, PREPARATION_FILE, MAX_RESOURCE_BYTES, resource_files, read_preparation, validate_preparation
 
 SOURCE_FILES = [
     'backend/core/__init__.py', 'backend/core/documents.py', 'backend/core/tex_worker.py',
     'backend/core/tex_templates/math-a4-v1.tex', 'backend/core/tex_templates/math-a4-v2.tex',
-    'backend/core/document_content.py', 'backend/core/content.py', 'backend/core/tex_project.py', 'backend/core/tex_cache.py', 'backend/core/tex_runtime.py', 'backend/core/tex_toolchain.py', 'backend/core/tex_remote.py', 'scripts/tex_service.py',
+    'backend/core/document_content.py', 'backend/core/content.py', 'backend/core/tex_project.py', 'backend/core/tex_cache.py', 'backend/core/tex_runtime.py', 'backend/core/tex_toolchain.py', 'backend/core/tex_resources.py', 'backend/core/tex_remote.py', 'scripts/tex_service.py',
     'scripts/setup_tex.py', 'scripts/download_asset.py', 'scripts/preview_tex.py', 'requirements-tex.lock',
     'docs/tex-preflight.md', 'docs/worksheet-builder.md',
 ]
@@ -20,10 +21,10 @@ SOURCE_FILES = [
 
 def toolchain_files(root=None, cache_root=None):
     root=Path(root or settings.BASE_DIR)
-    cache=Path(cache_root or settings.LOCAL_DIR/'tectonic-cache')
+    cache=Path(cache_root or getattr(settings,'TEX_RESOURCE_DIR',None) or settings.LOCAL_DIR/'tectonic-cache')
     sources={name:root/name for name in SOURCE_FILES}
-    resources={'.local/tectonic-cache/'+str(path.relative_to(cache)):path
-               for path in cache.rglob('*') if path.is_file() and not path.is_symlink()}
+    try:resources={CACHE_PREFIX+name:path for name,path in resource_files(cache).items()}
+    except (OSError,ValueError) as error:raise CompilerUnavailable('Ресурсы TeX недоступны или превышают лимит 256 МиБ / 4096 записей. Администратору: переподготовьте доверенный кэш.') from error
     if not resources or any(not path.is_file() or path.is_symlink() for path in sources.values()):
         raise CompilerUnavailable('Пакет TeX не подготовлен. Администратору: выполните scripts/setup_tex.py.')
     return {**sources,**resources}
@@ -41,8 +42,15 @@ def _contract(files):
     hashes={};total_bytes=0
     for name,path in sorted(files.items()):
         info=path.stat();total_bytes+=info.st_size
+        if total_bytes>MAX_RESOURCE_BYTES:
+            raise CompilerUnavailable('Пакет TeX превышает лимит 256 МиБ.')
         signature=(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
         hashes[name]=_file_digest(path.absolute(),signature)
+    try:
+        receipt=read_preparation(files[CACHE_PREFIX+PREPARATION_FILE])
+        validate_preparation(hashes,receipt)
+    except (KeyError,ValueError,OSError) as error:
+        raise CompilerUnavailable('Кэш TeX не подготовлен для текущих шаблонов. Администратору: выполните scripts/setup_tex.py и скачайте новый архив; manifest скачанного пакета менять не нужно.') from error
     # Read the pinned version from the same installer used by the service.
     tree=ast.parse(files['scripts/setup_tex.py'].read_text())
     version=next(ast.literal_eval(node.value) for node in tree.body if isinstance(node,ast.Assign)
@@ -80,7 +88,19 @@ def toolchain_archive(*,open_file=False):
             temporary=cache.directory/(contract['contract_id']+'.'+uuid4().hex+'.tmp')
             try:
                 with zipfile.ZipFile(temporary,'w',zipfile.ZIP_DEFLATED) as archive:
-                    for relative,path in files.items():archive.write(path,relative)
+                    # Hash the actual archived bytes. A concurrent setup or code update
+                    # must never publish a ZIP with a manifest for an earlier snapshot.
+                    for relative,path in files.items():
+                        digest=hashlib.sha256()
+                        with path.open('rb') as source,archive.open(relative,'w') as destination:
+                            while block:=source.read(1024*1024):
+                                digest.update(block);destination.write(block)
+                                if archive.fp.tell()>cache.max_bytes:
+                                    raise CompilerUnavailable('Архив TeX превышает настроенный лимит кэша.')
+                        if digest.hexdigest()!=contract['files'][relative]:
+                            raise CompilerUnavailable('Файлы TeX изменились при сборке архива. Повторите скачивание после завершения подготовки.')
+                    if _contract(toolchain_files())['contract_id']!=contract['contract_id']:
+                        raise CompilerUnavailable('Пакет TeX изменился при сборке архива. Повторите скачивание.')
                     archive.writestr('toolchain-manifest.json',json.dumps(contract,ensure_ascii=False,indent=2))
                 if temporary.stat().st_size>cache.max_bytes:raise CompilerUnavailable('Архив TeX превышает настроенный лимит кэша.')
                 temporary.chmod(0o600);os.replace(temporary,target)

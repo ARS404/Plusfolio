@@ -14,9 +14,92 @@ from rest_framework.test import APIClient
 from .documents import project_for
 from .tex_toolchain import SOURCE_FILES,build_contract,toolchain_archive
 from .models import User
+from .tex_resources import PREPARATION_FILE, record_preparation, trusted_paths
 
 
+@override_settings(TEX_RESOURCE_DIR=None)
 class PortableToolchainTests(SimpleTestCase):
+    def prepared_fixture(self,root):
+        for name in SOURCE_FILES:
+            path=root/name;path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_text("VERSION='0.17.0'\n" if name=='scripts/setup_tex.py' else 'trusted source')
+        resources=root/'.local/tectonic-cache';resources.mkdir(parents=True)
+        (resources/'tcolorbox.sty').write_bytes(b'trusted package')
+        record_preparation(root,resources)
+        return resources
+
+    def test_export_requires_successful_preparation_for_current_templates_and_resources(self):
+        from .documents import CompilerUnavailable
+        with TemporaryDirectory() as directory:
+            root=Path(directory);resources=self.prepared_fixture(root)
+            original=(resources/PREPARATION_FILE).read_bytes()
+            for change in ['missing receipt','missing tcolorbox','changed template','new resource']:
+                with self.subTest(change=change):
+                    if change=='missing receipt':(resources/PREPARATION_FILE).unlink()
+                    elif change=='missing tcolorbox':(resources/'tcolorbox.sty').unlink()
+                    elif change=='changed template':(root/'backend/core/tex_templates/math-a4-v2.tex').write_text('updated template')
+                    else:(resources/'unexpected.sty').write_text('unexpected')
+                    with self.assertRaises(CompilerUnavailable):build_contract(root,resources)
+                    (resources/PREPARATION_FILE).write_bytes(original)
+                    (resources/'tcolorbox.sty').write_bytes(b'trusted package')
+                    (root/'backend/core/tex_templates/math-a4-v2.tex').write_text('trusted source')
+                    (resources/'unexpected.sty').unlink(missing_ok=True)
+            build_contract(root,resources)
+
+    def test_image_resources_override_stale_persistent_volume_and_backup_uses_them(self):
+        import shutil
+        with TemporaryDirectory() as directory:
+            root=Path(directory);old=self.prepared_fixture(root);image=root/'tex-runtime/tectonic-cache'
+            shutil.copytree(old,image)
+            (old/'tcolorbox.sty').unlink()
+            with override_settings(BASE_DIR=root,LOCAL_DIR=root/'.local',TEX_RESOURCE_DIR=image):
+                current=build_contract()
+                self.assertEqual(current,build_contract(root,image))
+                with toolchain_archive(open_file=True) as stream,zipfile.ZipFile(stream) as archive:
+                    self.assertEqual(archive.read('.local/tectonic-cache/tcolorbox.sty'),b'trusted package')
+            paths=trusted_paths(root,{'PLUSFOLIO_TEX_RESOURCE_DIR':str(image),'PLUSFOLIO_TEX_COMPILER':str(root/'tex-runtime/tools/tectonic')})
+            self.assertEqual(paths['tectonic-cache'],image)
+            self.assertEqual(paths['tools'],root/'tex-runtime/tools')
+            self.assertEqual(trusted_paths(root,{})['tectonic-cache'],old)
+
+    def test_oversized_resource_trees_and_receipts_fail_before_hashing_payloads(self):
+        from .documents import CompilerUnavailable
+        with TemporaryDirectory() as directory:
+            root=Path(directory);resources=self.prepared_fixture(root)
+            with patch('core.tex_resources.MAX_RESOURCE_ENTRIES',1),patch('core.tex_toolchain._file_digest') as digest:
+                with self.assertRaises(CompilerUnavailable):build_contract(root,resources)
+                digest.assert_not_called()
+            with (resources/'oversized').open('wb') as stream:stream.truncate(256*1024*1024+1)
+            with patch('core.tex_toolchain._file_digest') as digest:
+                with self.assertRaises(CompilerUnavailable):build_contract(root,resources)
+                digest.assert_not_called()
+            (resources/'oversized').unlink()
+            with (resources/PREPARATION_FILE).open('wb') as stream:stream.truncate(2*1024*1024+1)
+            with self.assertRaises(CompilerUnavailable):build_contract(root,resources)
+
+    def test_archive_size_limit_cleans_partial_output_during_compression(self):
+        from .documents import CompilerUnavailable
+        with TemporaryDirectory() as directory:
+            root=Path(directory);resources=self.prepared_fixture(root)
+            (resources/'incompressible').write_bytes(os.urandom(2*1024*1024))
+            record_preparation(root,resources)
+            with override_settings(BASE_DIR=root,LOCAL_DIR=root/'.local',TEX_ARCHIVE_CACHE_MAX_BYTES=256*1024):
+                with self.assertRaises(CompilerUnavailable):toolchain_archive()
+            self.assertEqual([path.name for path in (root/'.local/tex-toolchains').iterdir()],['.lock'])
+
+    def test_archive_rejects_concurrent_file_changes_and_removes_partial_zip(self):
+        from .documents import CompilerUnavailable
+        from .tex_toolchain import _contract
+        with TemporaryDirectory() as directory:
+            root=Path(directory);self.prepared_fixture(root)
+            def changed(files):
+                contract=_contract(files)
+                (root/'docs/tex-preflight.md').write_text('changed during archive creation')
+                return contract
+            with override_settings(BASE_DIR=root,LOCAL_DIR=root/'.local'),patch('core.tex_toolchain._contract',side_effect=changed):
+                with self.assertRaises(CompilerUnavailable):toolchain_archive()
+            self.assertEqual([path.name for path in (root/'.local/tex-toolchains').iterdir()],['.lock'])
+
     def test_disabled_archive_cache_returns_service_unavailable_without_building(self):
         from .documents import CompilerUnavailable
         from .tex_cache import ArtifactCache
@@ -33,7 +116,7 @@ class PortableToolchainTests(SimpleTestCase):
             for name in SOURCE_FILES:
                 path=root/name;path.parent.mkdir(parents=True,exist_ok=True)
                 path.write_text("VERSION='0.17.0'\n" if name=='scripts/setup_tex.py' else 'trusted source')
-            resources=root/'.local/tectonic-cache';resources.mkdir(parents=True);(resources/'resource').write_bytes(b'trusted font')
+            resources=root/'.local/tectonic-cache';resources.mkdir(parents=True);(resources/'resource').write_bytes(b'trusted font');record_preparation(root,resources)
             with override_settings(BASE_DIR=root,LOCAL_DIR=root/'.local'),toolchain_archive(open_file=True) as stream:
                 path=Path(stream.name)
                 ArtifactCache(path.parent,'zip',0,0,0).prune()
@@ -46,7 +129,7 @@ class PortableToolchainTests(SimpleTestCase):
             for name in SOURCE_FILES:
                 path=root/name;path.parent.mkdir(parents=True,exist_ok=True)
                 path.write_text("VERSION='0.17.0'\n" if name=='scripts/setup_tex.py' else 'trusted source')
-            cache=root/'.local/tectonic-cache';cache.mkdir(parents=True);(cache/'resource').write_bytes(b'trusted font')
+            cache=root/'.local/tectonic-cache';cache.mkdir(parents=True);(cache/'resource').write_bytes(b'trusted font');record_preparation(root,cache)
             (root/'.local/app.key').write_text('not exported')
             first=build_contract(root,cache)
             self.assertEqual(first['compiler']['version'],'0.17.0')
@@ -57,7 +140,7 @@ class PortableToolchainTests(SimpleTestCase):
                 with zipfile.ZipFile(archive) as data:
                     self.assertEqual(set(data.namelist()),set(first['files'])|{'toolchain-manifest.json'})
                     self.assertEqual(json.loads(data.read('toolchain-manifest.json'))['contract_id'],first['contract_id'])
-            (cache/'resource').write_bytes(b'changed font')
+            (cache/'resource').write_bytes(b'changed font');record_preparation(root,cache)
             self.assertNotEqual(first['contract_id'],build_contract(root,cache)['contract_id'])
 
     def test_warm_contract_reuses_digests_and_invalidates_preserved_mtime_and_replacements(self):
@@ -69,7 +152,7 @@ class PortableToolchainTests(SimpleTestCase):
                 path=root/name;path.parent.mkdir(parents=True,exist_ok=True)
                 path.write_text("VERSION='0.17.0'\n" if name=='scripts/setup_tex.py' else 'trusted source')
             cache=root/'.local/tectonic-cache';cache.mkdir(parents=True)
-            resource=cache/'resource';resource.write_bytes(b'first')
+            resource=cache/'resource';resource.write_bytes(b'first');record_preparation(root,cache)
             first=build_contract(root,cache)
             digest=hashlib.file_digest
             with patch('core.tex_toolchain.hashlib.file_digest',wraps=digest) as reads:
@@ -77,14 +160,14 @@ class PortableToolchainTests(SimpleTestCase):
             self.assertEqual(reads.call_count,0)
             info=resource.stat();resource.write_bytes(b'other')
             os.utime(resource,ns=(info.st_atime_ns,info.st_mtime_ns))
-            changed=build_contract(root,cache)
+            record_preparation(root,cache);changed=build_contract(root,cache)
             self.assertNotEqual(first['contract_id'],changed['contract_id'])
             replacement=cache/'replacement';replacement.write_bytes(b'final')
-            os.utime(replacement,ns=(info.st_atime_ns,info.st_mtime_ns));replacement.replace(resource)
+            os.utime(replacement,ns=(info.st_atime_ns,info.st_mtime_ns));replacement.replace(resource);record_preparation(root,cache)
             self.assertNotEqual(changed['contract_id'],build_contract(root,cache)['contract_id'])
-            extra=cache/'extra';extra.write_bytes(b'extra')
+            extra=cache/'extra';extra.write_bytes(b'extra');record_preparation(root,cache)
             self.assertIn('.local/tectonic-cache/extra',build_contract(root,cache)['files'])
-            extra.unlink();self.assertNotIn('.local/tectonic-cache/extra',build_contract(root,cache)['files'])
+            extra.unlink();record_preparation(root,cache);self.assertNotIn('.local/tectonic-cache/extra',build_contract(root,cache)['files'])
 
     def test_hidden_solution_source_is_neither_validated_nor_added_to_project(self):
         from django.core.exceptions import ValidationError

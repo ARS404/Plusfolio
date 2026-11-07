@@ -25,7 +25,9 @@ def verify(expected):
     if supplied.exists():
         downloaded=json.loads(supplied.read_text())
         if downloaded['contract_id']!=contract['contract_id'] or downloaded['files']!=contract['files']:
-            raise ValueError('Toolchain files differ from the downloaded manifest')
+            changed=sorted(name for name in set(downloaded['files'])|set(contract['files'])
+                           if downloaded['files'].get(name)!=contract['files'].get(name))
+            raise ValueError('Toolchain files differ from the downloaded manifest: '+', '.join(changed[:10])+'. Download a newly prepared archive; do not regenerate its manifest locally.')
     if expected and contract['contract_id']!=expected:
         raise ValueError('Toolchain differs from the current service contract; download it again')
     return contract
@@ -87,7 +89,7 @@ def main():
     from core.tex_runtime import job_directory
     contract=verify(args.expected_contract)
     if args.prepare:
-        subprocess.run([sys.executable,str(ROOT/'scripts/setup_tex.py')],check=True)
+        subprocess.run([sys.executable,str(ROOT/'scripts/setup_tex.py'),'--offline'],check=True)
         verify(args.expected_contract)
         return
     if not args.input or not args.output:parser.error('--input and --output are required')

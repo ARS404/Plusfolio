@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Install pinned official Tectonic and warm trusted template/TikZ resources, never user data."""
-import hashlib, json, os, platform, shutil, subprocess, tarfile, tempfile, time
+import argparse, hashlib, json, os, platform, shutil, subprocess, sys, tarfile, tempfile, time
 from pathlib import Path
 from download_asset import download
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'backend'))
+from core.tex_resources import record_preparation
 VERSION='0.17.0'
 ASSETS={
  ('Darwin','arm64'):('aarch64-apple-darwin','a3f1cac7c5678f01661a92212f58480ae3b0634115d880dbc59e2953ded45667'),
@@ -27,7 +29,10 @@ def install_compiler(asset,binary,digest):
   if temporary is not None:temporary.unlink(missing_ok=True)
 
 
-def main():
+def main(argv=None):
+ parser=argparse.ArgumentParser(description=__doc__)
+ parser.add_argument('--offline',action='store_true',help='Validate bundled resources in a temporary copy; never download or modify them.')
+ args=parser.parse_args(argv)
  target,digest=ASSETS[(platform.system(),platform.machine())]
  tools=ROOT/'.local/tools';tools.mkdir(parents=True,exist_ok=True);binary=tools/'tectonic'
  if not binary.exists():
@@ -41,6 +46,19 @@ def main():
  frozen_cache=ROOT/'.local/tectonic-cache'
  cache=Path(os.environ.get('PLUSFOLIO_TEX_SHARED_CACHE',str(frozen_cache)));config=ROOT/'.local/tectonic-config'
  cache.mkdir(parents=True,exist_ok=True);config.mkdir(exist_ok=True)
+ if args.offline:
+  with tempfile.TemporaryDirectory(prefix='plusfolio-tex-offline-') as directory:
+   isolated=Path(directory)/'cache';shutil.copytree(frozen_cache,isolated)
+   prepare_templates(binary,isolated,config,offline=True)
+ else:
+  prepare_templates(binary,cache,config)
+  if cache.resolve()!=frozen_cache.resolve():shutil.copytree(cache,frozen_cache,dirs_exist_ok=True)
+  record_preparation(ROOT,frozen_cache)
+ total=sum(path.stat().st_size for path in frozen_cache.rglob('*') if path.is_file())
+ print(json.dumps({'compiler':version,'binary_mib':round(binary.stat().st_size/1024**2,1),'cache_mib':round(total/1024**2,1),'offline_check':'passed'},ensure_ascii=False))
+
+
+def prepare_templates(binary,cache,config,*,offline=False):
  env={'PATH':'/usr/bin:/bin','LANG':'en_US.UTF-8','TECTONIC_CACHE_DIR':str(cache),'XDG_CONFIG_HOME':str(config),'TECTONIC_UNTRUSTED_MODE':'1'}
  with tempfile.TemporaryDirectory(prefix='plusfolio-tex-setup-') as directory:
   work=Path(directory)
@@ -56,6 +74,8 @@ def main():
   (work/'solutions.tex').write_text(r'\section*{Решения}Ответ: $55$.')
   print('Warming the trusted template, Russian fonts and TikZ bundle cache...',flush=True)
   ready=subprocess.run([str(binary),'-X','compile','--untrusted','--only-cached','main.tex'],cwd=work,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=60).returncode==0
+  if offline and not ready:
+   raise RuntimeError('Bundled offline TeX resources are incomplete. Ask the administrator to run scripts/setup_tex.py and rebuild the toolchain archive; do not update the downloaded manifest.')
   for attempt in range(0 if ready else 3):
    try:
     subprocess.run([str(binary),'-X','compile','--untrusted','main.tex'],cwd=work,env=env,check=True,timeout=600)
@@ -69,8 +89,5 @@ def main():
   (work/'template.tex').write_text((ROOT/'backend/core/tex_templates/math-a4-v1.tex').read_text())
   (work/'problems.tex').write_text(r'\begin{enumerate}\item Старый шаблон: $2+2=4$.\end{enumerate}')
   subprocess.run([str(binary),'-X','compile','--untrusted','--only-cached','main.tex'],cwd=work,env=env,check=True,timeout=30)
- if cache!=frozen_cache:shutil.copytree(cache,frozen_cache,dirs_exist_ok=True)
- total=sum(path.stat().st_size for path in cache.rglob('*') if path.is_file())
- print(json.dumps({'compiler':version,'binary_mib':round(binary.stat().st_size/1024**2,1),'cache_mib':round(total/1024**2,1),'offline_check':'passed'},ensure_ascii=False))
 
 if __name__=='__main__':main()

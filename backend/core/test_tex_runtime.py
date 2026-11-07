@@ -118,16 +118,47 @@ class TrustedPreparationTests(SimpleTestCase):
     def test_downloaded_preparation_keeps_final_offline_verification(self):
         self.check_preparation(cached=False,expected=['v2','v2','v2','v1'])
 
+    def test_portable_preparation_checks_a_copy_and_never_downloads_resources(self):
+        self.check_portable_preparation(complete=True)
+
+    def test_portable_preparation_rejects_missing_packages_without_online_fallback(self):
+        self.check_portable_preparation(complete=False)
+
+    def check_portable_preparation(self,*,complete):
+        module=self.load_installer()
+        with TemporaryDirectory() as directory:
+            root=Path(directory);tools=root/'.local/tools';tools.mkdir(parents=True);(tools/'tectonic').write_bytes(b'compiler')
+            resources=root/'.local/tectonic-cache';resources.mkdir();(resources/'resource').write_bytes(b'frozen bytes')
+            templates=root/'backend/core/tex_templates';templates.mkdir(parents=True)
+            for version in ['v1','v2']:(templates/f'math-a4-{version}.tex').write_text(version)
+            def compile(command,**kwargs):
+                self.assertIn('--only-cached',command)
+                cache=Path(kwargs['env']['TECTONIC_CACHE_DIR'])
+                self.assertNotEqual(cache,resources)
+                (cache/'resource').write_bytes(b'compiler cache mutation')
+                (cache/'generated-format').write_bytes(b'temporary format')
+                return SimpleNamespace(returncode=0 if complete else 1)
+            with patch.object(module,'ROOT',root),patch.object(module.subprocess,'check_output',return_value='Tectonic 0.17.0'),patch.object(module.subprocess,'run',side_effect=compile) as run,patch.object(module,'record_preparation') as record,redirect_stdout(io.StringIO()):
+                if complete:module.main(['--offline'])
+                else:
+                    with self.assertRaisesRegex(RuntimeError,'incomplete'):module.main(['--offline'])
+            self.assertEqual(run.call_count,2 if complete else 1)
+            record.assert_not_called()
+            self.assertEqual(list(resources.iterdir()),[resources/'resource'])
+            self.assertEqual((resources/'resource').read_bytes(),b'frozen bytes')
+
     def check_preparation(self,*,cached,expected):
         module=self.load_installer()
         with TemporaryDirectory() as directory:
             root=Path(directory);tools=root/'.local/tools';tools.mkdir(parents=True);(tools/'tectonic').write_bytes(b'compiler')
             templates=root/'backend/core/tex_templates';templates.mkdir(parents=True)
             for version in ['v1','v2']:(templates/f'math-a4-{version}.tex').write_text(version)
+            for name in ['scripts/setup_tex.py','backend/core/tex_resources.py']:
+                source=root/name;source.parent.mkdir(parents=True,exist_ok=True);source.write_text('trusted installer')
             seen=[]
             def compile(command,**kwargs):
                 seen.append((Path(kwargs['cwd'])/'template.tex').read_text())
                 return SimpleNamespace(returncode=0 if cached or len(seen)>1 else 1)
             with patch.object(module,'ROOT',root),patch.dict(os.environ,{'PLUSFOLIO_TEX_SHARED_CACHE':str(root/'.local/tectonic-cache')}),patch.object(module.subprocess,'check_output',return_value='Tectonic 0.17.0'),patch.object(module.subprocess,'run',side_effect=compile),redirect_stdout(io.StringIO()):
-                module.main()
+                module.main([])
             self.assertEqual(seen,expected)

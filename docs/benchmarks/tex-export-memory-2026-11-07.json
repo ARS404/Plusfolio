@@ -1,0 +1,200 @@
+{
+  "date": "2026-11-07",
+  "scope": {
+    "production": "Read-only host and cgroup counters; three samples over at least ten seconds. No workload, restart or deployment. Temporary /32 SSH rule removed and original rule set verified.",
+    "export_stress": "Local macOS process, cold ZIP build followed by 48 streamed downloads with eight concurrent workers. This is not a production load test."
+  },
+  "production": {
+    "host": {
+      "total": 4105072640,
+      "available": 2372874240,
+      "swap_used": 0,
+      "oom_kill": 0
+    },
+    "containers": {
+      "indexer": {
+        "memory_current_bytes": 78004224,
+        "anonymous_bytes": 74506240,
+        "file_bytes": 16384,
+        "shmem_bytes": 0,
+        "memory_peak_bytes": 94015488,
+        "memory_limit_bytes": 268435456,
+        "restarts": 0,
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        }
+      },
+      "web": {
+        "memory_current_bytes": 328613888,
+        "anonymous_bytes": 269197312,
+        "file_bytes": 54124544,
+        "shmem_bytes": 0,
+        "memory_peak_bytes": 343920640,
+        "memory_limit_bytes": 536870912,
+        "restarts": 0,
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        }
+      },
+      "backup": {
+        "memory_current_bytes": 264278016,
+        "anonymous_bytes": 46993408,
+        "file_bytes": 206348288,
+        "shmem_bytes": 0,
+        "memory_peak_bytes": 269074432,
+        "memory_limit_bytes": 268435456,
+        "restarts": 0,
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 6244,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        }
+      },
+      "mail": {
+        "memory_current_bytes": 69607424,
+        "anonymous_bytes": 66224128,
+        "file_bytes": 98304,
+        "shmem_bytes": 0,
+        "memory_peak_bytes": 131420160,
+        "memory_limit_bytes": 201326592,
+        "restarts": 0,
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        }
+      },
+      "tex": {
+        "memory_current_bytes": 35086336,
+        "anonymous_bytes": 12644352,
+        "file_bytes": 21000192,
+        "shmem_bytes": 0,
+        "memory_peak_bytes": 246157312,
+        "memory_limit_bytes": 536870912,
+        "restarts": 0,
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        }
+      },
+      "embeddings": {
+        "memory_current_bytes": 519708672,
+        "anonymous_bytes": 514777088,
+        "file_bytes": 2031616,
+        "shmem_bytes": 0,
+        "memory_peak_bytes": 547217408,
+        "memory_limit_bytes": 1073741824,
+        "restarts": 0,
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        }
+      },
+      "redis": {
+        "memory_current_bytes": 7290880,
+        "anonymous_bytes": 5046272,
+        "file_bytes": 1191936,
+        "shmem_bytes": 0,
+        "memory_peak_bytes": 11743232,
+        "memory_limit_bytes": 134217728,
+        "restarts": 0,
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        }
+      },
+      "db": {
+        "memory_current_bytes": 81403904,
+        "anonymous_bytes": 8765440,
+        "file_bytes": 65368064,
+        "shmem_bytes": 41320448,
+        "memory_peak_bytes": 135446528,
+        "memory_limit_bytes": 536870912,
+        "restarts": 0,
+        "events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0
+        }
+      }
+    },
+    "ssh_closed": true,
+    "backup_note": "Backup is near its cgroup limit primarily because of file-backed pages (shmem=0). Its max counter predates the samples and is unchanged; no OOM or restart occurred."
+  },
+  "local_export": {
+    "contract_id": "b0b84369abcf1bc2c4c33cee9a9e09bf623be249be1108b5c4989723e0bc456d",
+    "archive_bytes": 13504569,
+    "downloads": 48,
+    "concurrency": 8,
+    "seconds": 5.905,
+    "python_cold_peak_bytes": 5650652,
+    "python_warm_current_bytes": 1125574,
+    "python_retained_delta_bytes": 31469,
+    "python_concurrent_extra_peak_bytes": 11711076,
+    "process_warm_peak_rss_bytes": 55721984,
+    "process_final_peak_rss_bytes": 67682304,
+    "digest_cache": {
+      "hits": 48600,
+      "misses": 486,
+      "maxsize": 4096,
+      "currsize": 486
+    },
+    "disk_cache": {
+      "files": 1,
+      "bytes": 13504569,
+      "removed": 0,
+      "max_bytes": 134217728,
+      "max_files": 2,
+      "max_age_seconds": 1209600
+    },
+    "partial_files": 0,
+    "every_download_identical": true,
+    "scope": "Local process on macOS; production metrics are recorded separately in live-memory.json."
+  },
+  "verification": {
+    "application_tests": 67,
+    "infrastructure_tests": 36,
+    "unchanged_release_version": "1.0.4"
+  },
+  "implementation": {
+    "resource_budget_bytes": 268435456,
+    "resource_entry_budget": 4096,
+    "receipt_budget_bytes": 2097152,
+    "archive_cache_bytes": 134217728,
+    "archive_cache_files": 2,
+    "streaming_pack_chunk_bytes": 1048576,
+    "immutable_image_resources": "/app/tex-runtime",
+    "backup_restore_paths": "source/.local/... (unchanged)"
+  }
+}

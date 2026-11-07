@@ -6,6 +6,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'scripts'))
+sys.path.insert(0,str(ROOT/'backend'))
+from core.tex_resources import trusted_paths
 ARCHIVE_NAME=r'plusfolio-\d{8}T\d{12}Z\.tar\.gz\.age'
 
 
@@ -97,9 +99,9 @@ def _backup():
                 if path.is_file() and not path.is_symlink() and '__pycache__' not in path.parts and path.suffix!='.pyc':paths['source/'+str(path.relative_to(ROOT))]=path
         for name in ['README.md','CHANGELOG.md','release.json','compose.yml','.dockerignore','.gitignore','requirements.lock','requirements-server.lock','requirements-tex.lock','requirements.txt']:
             paths['source/'+name]=ROOT/name
-        for name in ['tools','tectonic-cache','tectonic-config']:
-            for path in (ROOT/'.local'/name).rglob('*'):
-                if path.is_file() and not path.is_symlink():paths['source/.local/'+str(path.relative_to(ROOT/'.local'))]=path
+        for name,directory in trusted_paths(ROOT).items():
+            for path in directory.rglob('*'):
+                if path.is_file() and not path.is_symlink():paths['source/.local/'+name+'/'+str(path.relative_to(directory))]=path
         for path in Path('/model').rglob('*'):
             if path.is_file() and not path.is_symlink():paths['model/'+str(path.relative_to('/model'))]=path
         # The decrypting key is deliberately excluded. Keep it outside the server too.
