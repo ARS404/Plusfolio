@@ -2,17 +2,21 @@
 import hashlib
 import json
 import os
+import re
 import stat
+import time
 from pathlib import Path
-from uuid import uuid4
+from .tex_runtime import job_directory
 
 PREPARATION_FILE = 'plusfolio-prepared.json'
 CACHE_PREFIX = '.local/tectonic-cache/'
 MAX_RESOURCE_ENTRIES = 4096
 MAX_RESOURCE_BYTES = 256*1024*1024
 MAX_RECEIPT_BYTES = 2*1024*1024
+PREPARATION_TEMPORARY = re.compile(r'\.prepared-[0-9a-f]{32}\.tmp')
+LEGACY_TEMP_GRACE_SECONDS = 86400
 PREPARATION_SOURCES = (
-    'scripts/setup_tex.py', 'backend/core/tex_resources.py',
+    'scripts/setup_tex.py', 'backend/core/tex_resources.py', 'backend/core/tex_runtime.py',
     'backend/core/tex_templates/math-a4-v1.tex',
     'backend/core/tex_templates/math-a4-v2.tex',
 )
@@ -31,6 +35,9 @@ def resource_files(cache):
                 if stat.S_ISDIR(info.st_mode):
                     pending.append(Path(entry.path))
                 elif stat.S_ISREG(info.st_mode):
+                    # Receipt staging bytes are never part of trusted resources,
+                    # including leftovers from older installers without leases.
+                    if PREPARATION_TEMPORARY.fullmatch(entry.name):continue
                     total += info.st_size
                     if total > MAX_RESOURCE_BYTES:
                         raise ValueError('TeX resources exceed the 256 MiB limit; rebuild the trusted cache.')
@@ -62,24 +69,34 @@ def file_hash(path):
 
 
 def record_preparation(root, cache):
-    """Call only after every trusted template passed offline compilation."""
-    root = Path(root); cache = Path(cache)
+    """Publish a leased receipt only after every trusted template compiled offline.
+
+    Fresh legacy receipt temporaries may belong to another installer, so they
+    stay on disk but are excluded from resource hashes and exported snapshots.
+    Only day-old regular temporaries owned by this account are reclaimed.
+    """
+    root = Path(root); cache = Path(cache); now = time.time()
+    with os.scandir(cache) as entries:
+        for entry in entries:
+            if not PREPARATION_TEMPORARY.fullmatch(entry.name):continue
+            try:info = entry.stat(follow_symlinks=False)
+            except FileNotFoundError:continue
+            if stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid() and now-info.st_mtime > LEGACY_TEMP_GRACE_SECONDS:
+                Path(entry.path).unlink(missing_ok=True)
     receipt = {
         'version': 1,
         'sources': {name: file_hash(root/name) for name in PREPARATION_SOURCES},
         'resources': {name: file_hash(path) for name, path in resource_files(cache).items()
                       if name != PREPARATION_FILE},
     }
-    temporary = cache/('.prepared-'+uuid4().hex+'.tmp')
-    try:
+    with job_directory(cache.parent/'.tex-preparation-jobs') as work:
+        temporary = work/PREPARATION_FILE
         data = json.dumps(receipt, sort_keys=True).encode()
         if len(data) > MAX_RECEIPT_BYTES:
             raise ValueError('TeX preparation receipt exceeds 2 MiB.')
         temporary.write_bytes(data)
         temporary.chmod(0o600)
         os.replace(temporary, cache/PREPARATION_FILE)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def validate_preparation(hashes, receipt):

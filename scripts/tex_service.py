@@ -4,11 +4,10 @@ import base64, json, os, socketserver, subprocess, sys, threading
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 SOCKET=Path(os.environ.get('PLUSFOLIO_TEX_SOCKET','/run/plusfolio-tex/compiler.sock'))
-LIMIT=8*1024*1024
 GATE=threading.BoundedSemaphore(1)
 MAX_CLIENTS=4
 sys.path.insert(0,str(ROOT/'backend'))
-from core.tex_project import write_project
+from core.tex_project import MAX_PDF_BYTES,MAX_PROJECT_BYTES,write_project
 from core.tex_runtime import run_compiler,job_directory
 
 
@@ -25,8 +24,8 @@ def compile_project(project,diagnostic=False):
         if returncode or not pdf.exists():
             if diagnostic:print('Trusted compiler startup check: '+output.decode(errors='replace')[:4000],file=sys.stderr,flush=True)
             raise ValueError('Не удалось собрать PDF. Проверьте TeX и доступность пакетов.')
-        if pdf.stat().st_size>16*1024*1024:raise ValueError('PDF превышает 16 МиБ.')
-        data=pdf.read_bytes()
+        with pdf.open('rb') as source:data=source.read(MAX_PDF_BYTES+1)
+        if len(data)>MAX_PDF_BYTES:raise ValueError('PDF превышает 16 МиБ.')
         if not data.startswith(b'%PDF-'):raise ValueError('Invalid PDF')
         log=output.decode(errors='replace')
         if (work/'main.log').exists():
@@ -41,7 +40,7 @@ class Handler(socketserver.StreamRequestHandler):
         try:
             header=self.rfile.readline(32)
             size=int(header)
-            if not 1<=size<=LIMIT:raise ValueError('Invalid request size')
+            if not 1<=size<=MAX_PROJECT_BYTES:raise ValueError('Invalid request size')
             payload=self.rfile.read(size)
             if len(payload)!=size:raise ValueError('Incomplete request')
             # Probe messages are tiny. Large projects are decoded only by the active compiler.

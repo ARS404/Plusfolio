@@ -6,6 +6,8 @@ REQUIRED={'main.tex','template.tex','variables.tex','problems.tex','solutions.te
 TEXT_PATH=re.compile(r'(?:main|variables|template|problems|solutions)\.tex|(?:tasks|solutions|blocks)/[A-Za-z0-9_-]+\.tex')
 IMAGE_PATH=re.compile(r'assets/[0-9a-f-]{36}\.png')
 MAX_IMAGE_BYTES=4*1024*1024
+MAX_PROJECT_BYTES=8*1024*1024
+MAX_PDF_BYTES=16*1024*1024
 
 
 def project_files(project):

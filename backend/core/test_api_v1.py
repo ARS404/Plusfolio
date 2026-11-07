@@ -169,7 +169,7 @@ class DocumentationRepresentationsTests(SimpleTestCase):
                     self.assertEqual(right['links'],[])
                     if right['id']=='storage-maintenance':
                         self.assertEqual(right['operations'],[])
-                        self.assertIn('backend/manage.py tex_cache',json.dumps(right,ensure_ascii=False))
+                        self.assertIn('python3 scripts/server.py tex-cache',json.dumps(right,ensure_ascii=False))
                     else:
                         self.assertTrue(right['operations'])
 

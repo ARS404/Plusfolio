@@ -2,14 +2,17 @@
 import base64,json,socket
 from .documents import CompilerUnavailable
 from django.core.exceptions import ValidationError
+from .tex_project import MAX_PDF_BYTES,MAX_PROJECT_BYTES
 
 
 def request(socket_path,value):
-    payload=json.dumps(value,ensure_ascii=False).encode()
-    if len(payload)>8*1024*1024:raise ValidationError('Проект TeX превышает 8 МиБ.')
+    """Send a JSON value or reuse a project already validated and encoded by render_pdf."""
+    payload=value if isinstance(value,bytes) else json.dumps(value,ensure_ascii=False).encode()
+    if len(payload)>MAX_PROJECT_BYTES:raise ValidationError('Проект TeX превышает 8 МиБ.')
     try:
         with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as client:
-            client.settimeout(25);client.connect(socket_path);client.sendall(str(len(payload)).encode()+b'\n'+payload)
+            client.settimeout(25);client.connect(socket_path)
+            client.sendall(str(len(payload)).encode()+b'\n');client.sendall(payload)
             with client.makefile('rb') as stream:
                 size=int(stream.readline(32))
                 if not 1<=size<=24*1024*1024:raise ValueError()
@@ -25,6 +28,6 @@ def compile_project(path,project,diagnostics=None):
     if result.get('error'):raise ValidationError(result['error'])
     try:pdf=base64.b64decode(result['pdf'],validate=True)
     except (KeyError,ValueError):raise CompilerUnavailable()
-    if not pdf.startswith(b'%PDF-') or len(pdf)>16*1024*1024:raise CompilerUnavailable()
+    if not pdf.startswith(b'%PDF-') or len(pdf)>MAX_PDF_BYTES:raise CompilerUnavailable()
     if diagnostics is not None:diagnostics.update(cache_hit=False,warnings=result.get('warnings',[]))
     return pdf

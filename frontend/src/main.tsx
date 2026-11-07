@@ -1,4 +1,6 @@
 import {journalView,journalTotals,journalStudentSummary,journalProblemProgress,type JournalOrder} from './journalView';
+import {createMaterialDetailLoader} from './materialDetail';
+import {createWorksheetCopy} from './worksheetCopy';
 import WorksheetBuilder from './WorksheetBuilder';
 import IssueEditor from './IssueEditor';
 import ContentEditor from './ContentEditor';
@@ -6,7 +8,7 @@ import {ContentView,WorksheetContents} from './ContentView';
 import {initialBlocks,serializeWorksheetBlocks} from './worksheetBlocks';
 import './worksheet-builder.css';
 import StudentIdentityFields,{studentIdentity} from './StudentIdentityFields';
-import React,{useEffect,useMemo,useState,createContext,useContext} from 'react';
+import React,{useCallback,useEffect,useLayoutEffect,useMemo,useState,createContext,useContext} from 'react';
 import {createRoot} from 'react-dom/client';
 import {FileText,ArrowLeft,ArrowRight,BookOpen,Check,CheckCheck,ChevronDown,ChevronRight,ChevronsUpDown,CircleHelp,ClipboardList,Copy,FolderTree,GraduationCap,LayoutGrid,Mail,MapPin,Plus,Search,Settings2,Shield,Sparkles,Trash2,Users,X,BarChart3,LogOut,ExternalLink,Loader2,CheckCircle2,Download,Eye,Tags,UserRound} from 'lucide-react';
 import katex from 'katex';
@@ -53,6 +55,17 @@ function useResource(path:string|null,{keepDataOnReload=false}:{keepDataOnReload
  const retained=keepDataOnReload&&result.scope===scope;
  return {data:result.key===key||retained?result.data:null,error:result.key===key?result.error:'',refreshing:retained&&result.key!==key,reload:()=>setV(x=>x+1)};
 }
+function useMaterialDetail(scope:string){
+ const {user,setModal,toast}=useApp();
+ const loader=useMemo(()=>createMaterialDetailLoader({
+  load:(path,signal)=>api(path,'GET',undefined,signal),
+  onOpen:(data,materialKind)=>setModal({kind:'detail',data,materialKind}),
+  onError:toast,
+ }),[user.id,scope,setModal,toast]);
+ // Close the old request during commit, before another account or scope can paint.
+ useLayoutEffect(()=>()=>loader.cancel(),[loader]);
+ return loader.open;
+}
 function useDebounced<T>(value:T,delay=250){const [debounced,setDebounced]=useState(value);useEffect(()=>{const timer=setTimeout(()=>setDebounced(value),delay);return()=>clearTimeout(timer)},[value,delay]);return debounced}
 
 function Empty({icon:Icon=BookOpen,title,description,action}:any){return <div className="empty"><Icon size={34}/><h3>{title}</h3><p>{description}</p>{action}</div>}
@@ -83,14 +96,26 @@ function WorksheetChoice({value,onChange,circle}:any){
 function BrandMark(){return <span className="brand-mark" aria-hidden="true"><Plus size={28} strokeWidth={1.8}/></span>}
 function App(){
  const [user,setUser]=useState<User|null>(null),[boot,setBoot]=useState(false),[demo,setDemo]=useState(false),[route,setRoute]=useState(location.hash.slice(1)||'/circles'),[revision,setRevision]=useState(0),[toast,setToast]=useState(''),[modal,setModal]=useState<any>(null),[topics,setTopics]=useState<Topic[]>([]),[tags,setTags]=useState<any[]>([]),[catalogue,setCatalogue]=useState<any>(null),[switcher,setSwitcher]=useState(false);
- const refresh=()=>setRevision(x=>x+1);
+ const refresh=useCallback(()=>setRevision(x=>x+1),[]);
  const libraryAccess=canBrowseLibrary(user?.roles||[]);
  const blocked=!!user&&((!libraryAccess&&(libraryRoutes.includes(route)||route.startsWith('/worksheets')||route.startsWith('/students/')))||(route==='/users'&&!user.roles.includes('admin'))||(route.split('?')[0]==='/documentation/api'&&!user.can_use_api));
  useEffect(()=>{if(blocked)go('/circles')},[blocked,route]);
- useEffect(()=>{api('/session').then(x=>{setUser(x.user);setDemo(x.demo);setBoot(true)}).catch(e=>{setToast(e.message);setBoot(true)});const listener=()=>setRoute(location.hash.slice(1)||'/circles');window.addEventListener('hashchange',listener);return()=>window.removeEventListener('hashchange',listener)},[]);
- useEffect(()=>{if(user){api('/topics').then(x=>{setTopics(x.topics);setCatalogue(x.metadata)}).catch(e=>setToast(e.message));api('/tags').then(setTags).catch(e=>setToast(e.message))}},[user?.id,revision]);
+ useEffect(()=>{
+  const controller=new AbortController();
+  api('/session','GET',undefined,controller.signal).then(x=>{if(!controller.signal.aborted){setUser(x.user);setDemo(x.demo);setBoot(true)}}).catch(e=>{if(!controller.signal.aborted){setToast(e.message);setBoot(true)}});
+  const listener=()=>setRoute(location.hash.slice(1)||'/circles');window.addEventListener('hashchange',listener);
+  return()=>{controller.abort();window.removeEventListener('hashchange',listener)};
+ },[]);
+ useEffect(()=>{
+  if(!user)return;
+  const controller=new AbortController();
+  const failed=(error:Error)=>{if(!controller.signal.aborted)setToast(error.message)};
+  api('/topics','GET',undefined,controller.signal).then(x=>{if(!controller.signal.aborted){setTopics(x.topics);setCatalogue(x.metadata)}}).catch(failed);
+  api('/tags','GET',undefined,controller.signal).then(x=>{if(!controller.signal.aborted)setTags(x)}).catch(failed);
+  return()=>controller.abort();
+ },[user?.id,revision]);
  useEffect(()=>{if(toast){const t=setTimeout(()=>setToast(''),6000);return()=>clearTimeout(t)}},[toast]);
- const ctx={user,setUser,demo,revision,refresh,toast:setToast,modal,setModal,topics,tags,catalogue};
+ const ctx={user,setUser,demo,route,revision,refresh,toast:setToast,modal,setModal,topics,tags,catalogue};
  const loginAs=async(email:string)=>{try{const x=await api('/login','POST',{email,password:'PlusfolioDemo2026!'});setUser(x.user);setSwitcher(false);go('/circles')}catch(e:any){setToast(e.message)}};
  if(!boot)return <div className="boot"><BrandMark/><p>Открываем Plusfolio…</p></div>;
  return <Ctx.Provider value={ctx}>{!user||route.startsWith('/accept/')?<div className="auth-shell"><div className="auth-brand"><BrandMark/>Plusfolio</div><div className="auth-art"><span className="eyebrow">МАТЕМАТИКА СКЛАДЫВАЕТСЯ</span><h1>У каждого решения<br/>есть своя история.</h1><p>Кружки, задачи и маленькие открытия.<br/>Всё, что помогает увидеть большой прогресс.</p><div className="formula">a² + b² = <strong>возможности</strong></div></div><div className="auth-card">{route.startsWith('/accept/')?<AcceptInvite token={route.split('/')[2]}/>:<Login loginAs={loginAs}/>}</div></div>:<div className="app-shell"><aside className="sidebar"><a className="brand" href="#/circles"><BrandMark/>Plusfolio<span className="brand-dot"/></a><div className="workspace"><div className="workspace-icon"><GraduationCap size={21}/></div><div><b>Математические кружки</b><small>Рабочее пространство</small></div></div><span className="nav-caption">ПРОСТРАНСТВО</span><nav>{[[LayoutGrid,'Кружки','/circles'],...(user.roles.includes('student')?[[BookOpen,'Мои задачи','/my-materials']]:[]),...(libraryAccess?[[BookOpen,'Банк задач','/problems'],[ClipboardList,'Листки','/worksheets'],[FolderTree,'Темы','/topics']]:[]),[UserRound,'Личный кабинет','/account'],[BarChart3,user.roles.some(r=>r==='teacher'||r==='analyst'||r==='admin')?'Аналитика':'Мои результаты','/analytics'],...(!user.roles.every(r=>r==='student')?[[Mail,'Приглашения','/invitations']]:[]),...(user.roles.includes('admin')?[[Tags,'Теги','/tags'],[Shield,'Пользователи и роли','/users']]:[]),[FileText,'Документация','/documentation']].map(([Icon,label,path]:any)=><a key={path} aria-label={label} title={label} className={'nav-item '+(route.startsWith(path)?'active':'')} href={'#'+path}><Icon size={19}/><span>{label}</span>{path==='/circles'&&<span className="nav-plus">↗</span>}</a>)}</nav><div className="sidebar-bottom"><div className="demo-note"><span className="live-dot"/>{demo?'Локальная демоверсия':'Plusfolio'}<small>{demo?'Вымышленные данные · письма локальные':'Кружки, материалы и результаты'}</small></div><a className="profile-button" href="#/account" aria-label="Открыть личный кабинет"><Avatar name={user.name}/><span><b>{user.name}</b><small>{user.roles.map(r=>roleLabel(r)).join(' + ')}</small></span><UserRound size={15}/></a>{demo&&<button className="demo-switch-button" aria-label="Демо-профили" aria-expanded={switcher} onClick={()=>setSwitcher(!switcher)}><ChevronsUpDown size={14}/><span>Демо-профили</span></button>}{switcher&&<div className="account-switcher"><b>Попробовать другую роль</b>{['teacher','student','analyst','multi','admin'].map(r=><button key={r} onClick={()=>loginAs(r+'@plusfolio.example')}>{r==='multi'?'Учитель + аналитик':roleLabel(r)}<ArrowRight size={14}/></button>)}<button onClick={async()=>{await api('/logout','POST');setUser(null);setSwitcher(false)}}><LogOut size={14}/>Выйти</button></div>}</div></aside><div className="main-shell"><header className="topbar"><div><span className="topbar-dot"/>Ваше пространство для роста</div><div className="topbar-right"><span>{new Intl.DateTimeFormat('ru-RU',{day:'numeric',month:'long',timeZone:'Europe/Moscow'}).format(new Date())}</span><span className="topbar-divider"/><Badge tone="green">{user.roles.map(r=>roleLabel(r)).join(' + ')}</Badge></div></header><main key={user.id}><React.Suspense fallback={<Status loading/>}>{blocked?<Home/>:route.startsWith('/circles/')?<CirclePage id={route.split('/')[2]}/>:route==='/problems'?<Materials key="problem" kind="problem"/>:route.startsWith('/worksheets/')?<WorksheetPage key={route} id={route.split('/')[2]}/>:route==='/worksheets'?<WorksheetLibrary/>:route==='/topics'?<Topics/>:route.startsWith('/students/')?<StudentPage key={route} id={route.split('/')[2].split('?')[0]}/>:route==='/analytics'?<Analytics/>:route.split('?')[0]==='/documentation/api'?<ApiReference/>:(route.split('?')[0]==='/documentation'||route.startsWith('/documentation/'))?<Documentation sectionId={route.split('/')[2]}/>:route==='/account'?<Account/>:route==='/my-materials'?<MyMaterials/>:route==='/invitations'?<Invitations/>:route==='/tags'?<TagsPage/>:route==='/users'?<UsersPage/>:<Home/>}</React.Suspense></main><footer className="page-footer"><span title={__PLUSFOLIO_RELEASE__.status==='development'?'Версия в разработке':'Выпущенная версия'}>Plusfolio {__PLUSFOLIO_RELEASE__.version}{__PLUSFOLIO_RELEASE__.status==='development'?' · в разработке':''} <span>·</span> Каждая задача — новый шаг</span><span>Сделано для тех, кто любит думать <span className="footer-plus">+</span></span></footer></div></div>}{modal&&user&&<Editor modal={modal} close={()=>setModal(null)}/>}<div className={'toast '+(toast?'shown':'')}><CheckCircle2 size={18}/>{toast}</div></Ctx.Provider>
@@ -146,12 +171,10 @@ function Journal({circle}:any){
  const totals=useMemo(()=>journalTotals(blocks,journal?.solves||[],journal?.discussions||[]),[blocks,journal?.solves,journal?.discussions]);
  const taskProgress=useMemo(()=>journal?.show_group_stats?journalProblemProgress(blocks,states,visiblePeople):null,[blocks,states,visiblePeople,journal?.show_group_stats]);
  const problemCount=totals.total;
- const columns=useMemo(()=>blocks.reduce((count:number,block:any)=>count+block.problems.length+(journal?.show_group_stats?1:0),0),[blocks,journal?.show_group_stats]);
- const taskWidth=44,scoreColumns=journal?.show_group_stats?blocks.length:0;
- const tableWidth=190+(columns-scoreColumns)*taskWidth+scoreColumns*56;
- const openProblem=async(problem:any)=>{
-  try{const current=await api('/materials/problem/'+problem.id+'?circle='+circle.id);setModal({kind:'detail',data:current})}catch(e:any){toast(e.message)}
- };
+ const taskColumns=useMemo(()=>blocks.reduce((count:number,block:any)=>count+block.problems.length,0),[blocks]);
+ const scoreColumns=journal?.show_group_stats?blocks.length:0;
+ const openMaterial=useMaterialDetail(circle.id);
+ const openProblem=(problem:any)=>openMaterial('/materials/problem/'+problem.id+'?circle='+circle.id);
  const change=async(problem:any,student:any,kind:'solve'|'discussion'|'solution-visibility'='solve')=>{
   if(busy)return;
   setSaving(true);
@@ -210,8 +233,8 @@ function Journal({circle}:any){
    <div className="journal-intro"><div><h3>{blocks.length===1?blocks[0].worksheet.title:'Журнал по листкам'}</h3><span>{blocks.length===1?formatDate(blocks[0].issued_on)+' · ':'Листков: '+blocks.length+' · '}Уникальных задач: {problemCount} · Школьников: {visiblePeople.length}</span></div><span className="save-status"><span className={'live-dot '+(busy?'working':'')}/>{busy?'Сохраняем…':'Все изменения сохранены'}</span></div>
    {!!theoryBlocks.length&&<div className="theory-journal-sheets">{theoryBlocks.map((block:any)=><div className="theory-journal-sheet" key={block.issue_id}><div><b>{block.worksheet.title}</b><small>Без задач для плюсника</small></div><PdfActions document={block.worksheet} allowSource={user.roles.some((role:string)=>['teacher','admin'].includes(role))} onPreview={(data:any)=>setModal({kind:'pdf',data})}/></div>)}</div>}
    {allTasksHidden&&<Empty title="Все выбранные задачи разобраны" description="Снимите фильтр, чтобы снова увидеть их в таблице." action={<button className="btn secondary" onClick={()=>setHideDiscussed(false)}>Показать разобранные</button>}/>}
-   {!!blocks.length&&<div className="journal-scroll" style={{maxWidth:tableWidth+2}}><table className="journal-table grouped-journal" style={{width:tableWidth,minWidth:tableWidth,tableLayout:'fixed'}}>
-    <colgroup><col style={{width:190}}/>{blocks.map((block:any)=><React.Fragment key={block.issue_id}>{block.problems.map((problem:any)=><col key={problem.id} style={{width:taskWidth}}/>)}{journal.show_group_stats&&<col style={{width:56}}/>}</React.Fragment>)}</colgroup>
+   {!!blocks.length&&<div className="journal-scroll" style={{'--journal-task-columns':taskColumns,'--journal-score-columns':scoreColumns} as React.CSSProperties}><table className="journal-table grouped-journal">
+    <colgroup><col className="student-column"/>{blocks.map((block:any)=><React.Fragment key={block.issue_id}>{block.problems.map((problem:any)=><col key={problem.id} className="task-column"/>)}{journal.show_group_stats&&<col className="score-column"/>}</React.Fragment>)}</colgroup>
     <thead>
      <tr className="worksheet-heading-row"><th className="student-col" rowSpan={2} scope="col">Школьник <span>{visiblePeople.length}</span></th>{blocks.map((block:any,index:number)=><th key={block.issue_id} colSpan={block.problems.length+(journal.show_group_stats?1:0)} scope="colgroup" className={'worksheet-group block-start tone-'+index%2}><b>{block.worksheet.title}</b><EntityId value={block.worksheet.public_id}/><span>№ {block.number} · Выдан {formatDate(block.issued_on)}</span><PdfActions document={block.worksheet} allowSource={user.roles.some((role:string)=>['teacher','admin'].includes(role))} compact onPreview={(data:any)=>setModal({kind:'pdf',data})}/></th>)}</tr>
      <tr>{blocks.map((block:any,index:number)=><React.Fragment key={block.issue_id}>{block.problems.map((problem:any,position:number)=>{const progress=taskProgress?.get(problem.id);const solutionHint=discussions.get(problem.id)?.solution_visible?'Решение открыто школьникам':undefined;return <th key={problem.id} scope="col" className={'task-heading tone-'+index%2+(position===0?' block-start':'')}><button className="problem-number" aria-label={'Задача '+(problem.worksheet_position??position+1)+' · '+problem.public_id+' · '+problem.title+' · '+block.worksheet.title+(solutionHint?' · '+solutionHint:'')} data-solution-hint={solutionHint} onClick={()=>openProblem(problem)}>{problem.worksheet_position??position+1}{solutionHint&&<span className="solution-open-hint" aria-hidden="true"><Eye size={11}/></span>}</button><span className="column-hint" title={problem.public_id+' · '+problem.title}>{problem.public_id}</span>{progress&&<span className="task-progress" role="img" aria-label={'Прогресс: '+problem.title+' — решили '+progress.solved+' из '+progress.assigned+' получателей'} title="Решили / получили в текущем срезе школьников и выдач"><span>{progress.solved}/{progress.assigned}</span><i aria-hidden="true"><i style={{width:(progress.percent??0)+'%'}}/></i></span>}</th>})}{journal.show_group_stats&&<th scope="col" className={'score-col tone-'+index%2}>Решено</th>}</React.Fragment>)}</tr>
@@ -285,16 +308,18 @@ function WorksheetPage({id}:any){
 }
 
 function MyMaterials(){
- const {user,setModal,toast}=useApp();const [kind,setKind]=useState<'problem'|'worksheet'>('problem'),[q,setQ]=useState(''),[tags,setTags]=useState<string[]>([]);
+ const {user,setModal}=useApp();const [kind,setKind]=useState<'problem'|'worksheet'>('problem'),[q,setQ]=useState(''),[tags,setTags]=useState<string[]>([]);
  const debouncedQ=useDebounced(q,500);
  const {data,error}=useResource(user.roles.includes('student')&&!(kind==='problem'&&q.trim())?queryPath('/my-materials/'+kind,{q:q===''?'':debouncedQ,tag:tags,mode:'hybrid'}):null);
- const open=async(item:any)=>{try{const data=await api(kind==='problem'?'/my-problems/'+item.id:'/my-issues/'+item.id);setModal({kind:'detail',data,materialKind:kind})}catch(error:any){toast(error.message)}};
+ const openMaterial=useMaterialDetail(kind);
+ const open=(item:any)=>openMaterial(kind==='problem'?'/my-problems/'+item.id:'/my-issues/'+item.id,kind);
  if(!user.roles.includes('student'))return <Empty title="Раздел для школьника" description="Материалы преподавателей и аналитиков доступны в библиотеке."/>;
  return <><div className="page-heading"><div><span className="eyebrow">МОЯ МАТЕМАТИЧЕСКАЯ КОЛЛЕКЦИЯ</span><h1>Мои задачи<span className="heading-dot">.</span></h1><p>Задачи и все листки, которые вы получали на кружках. Открытые решения доступны и здесь.</p></div></div><div className="section-toolbar"><div className="segmented" role="tablist" aria-label="Мои материалы">{([['problem','Задачи'],['worksheet','Листки']] as const).map(([value,label])=><button key={value} role="tab" aria-selected={kind===value} className={kind===value?'selected':''} onClick={()=>{setKind(value);setTags([]);setQ('')}}>{label}</button>)}</div><div className="search-field wide"><Search size={16}/><input maxLength={kind==='problem'?12000:160} aria-label="Найти мои материалы" value={q} onChange={event=>setQ(event.target.value)} placeholder="ID, условие или открытое решение"/></div><TagFilter kind={kind} value={tags} onChange={setTags}/></div>{kind==='problem'&&q.trim()?<SearchMatches query={q} scope="my" tags={tags}/>:<Status error={error} loading={!data&&!error}/>}<div className="material-list">{!(kind==='problem'&&q.trim())&&data?.map((item:any)=><div className="material-item" key={item.id}><button type="button" className="material-card" onClick={()=>open(item)}><span className="material-index">{item.public_id}</span><div className="material-body"><div className="material-title"><h3>{item.title}</h3><Badge tone={kind==='problem'&&item.solved?'green':'gray'}>{kind==='problem'?(item.solved?'Решена':'В работе'):'№ '+item.number}</Badge></div><p>{kind==='problem'?(item.statement||'Условие с TeX и TikZ — откройте PDF'):(item.circle_name+' · '+formatDate(item.issued_on)+' · '+item.problem_count+' задач')}</p><div className="material-tags">{item.tags.map((tag:any)=><Badge key={tag.id}>{tag.name}</Badge>)}</div></div><div className="material-tail">{kind==='problem'&&item.solution!==undefined&&<span><Eye size={14}/>Решение открыто</span>}<ArrowRight size={18}/></div></button>{kind==='worksheet'&&<PdfActions document={item} onPreview={(data:any)=>setModal({kind:'pdf',data})}/>}</div>)}</div>{data&&!data.length&&<Empty title="Пока ничего не найдено" description="Здесь появятся назначенные вам задачи и листки. Попробуйте изменить фильтры."/>}<p className="personal-materials-note">Задачи учитываются без повторов. Листок, выданный в разных кружках, показан отдельно для каждой выдачи с её датой и номером. В списке до 300 записей; поиск и теги помогают уточнить выбор.</p></>;
 }
 
 function Materials({kind}:any){
- const {user,setModal,topics,toast}=useApp();
+ const {user,setModal,topics}=useApp();
+ const openMaterial=useMaterialDetail(kind);
  const [q,setQ]=useState(''),[topic,setTopic]=useState<string[]>([]),[tag,setTag]=useState<string[]>([]),[page,setPage]=useState(1),[searchFields,setSearchFields]=useState(['statement','solution','metadata']);
  const {data,error}=useResource(q.trim()?null:queryPath('/materials/'+kind,{topic,tag,q,pagination:'1',page:String(page),page_size:'50'}));
  const canCreate=user.roles.some((role:string)=>['teacher','admin'].includes(role));
@@ -307,7 +332,7 @@ function Materials({kind}:any){
   <div className="section-toolbar"><TagFilter kind="problem" value={tag} onChange={changeTags}/><TopicTreeFilter topics={topics} value={topic} onChange={changeTopics} label="Темы задач"/></div>
   <div className="text-search-panel"><label>Поиск по тексту задачи и решения<textarea aria-label="Найти задачу в банке" maxLength={12000} rows={2} value={q} onChange={event=>changeQ(event.target.value)} placeholder="Вставьте условие, решение или ID P-123"/></label><div className="text-search-fields">{[['statement','В условиях'],['solution','В решениях'],['metadata','В названиях и описаниях']].map(([value,label])=><label key={value}><input type="checkbox" checked={searchFields.includes(value)} onChange={()=>setSearchFields(old=>old.includes(value)?old.length>1?old.filter(item=>item!==value):old:[...old,value])}/>{label}</label>)}</div>{q.trim()&&<SearchMatches query={q} fields={searchFields} tags={tag} topics={topic}/>}</div>
   {!q.trim()&&<Status error={error} loading={!data&&!error}/ >}{!q.trim()&&data&&<div className="users-result-count" role="status">Найдено задач: {data.count}</div>}
-  <div className="material-list">{!q.trim()&&data?.results.map((problem:any)=><div className="material-item" key={problem.id}><button className="material-card" onClick={async()=>{try{const item=await api('/materials/problem/'+problem.id);setModal({kind:'detail',data:item,materialKind:'problem'})}catch(error:any){toast(error.message)}}}><span className="material-index">{problem.public_id}</span><div className="material-body"><div className="material-title"><h3>{problem.title}</h3><Badge tone="green">{problem.source||'В банке'}</Badge></div><p>{problem.statement}</p><div className="material-tags">{problem.topics.map((id:string)=><Badge key={id}>{topics.find((node:Topic)=>node.id===id)?.name||'Тема'}</Badge>)}{problem.tags.map((item:any)=><Badge tone="cream" key={item.id}>{item.name}</Badge>)}</div></div><div className="material-tail"><span>{problem.solution!==undefined?(problem.solution_kind==='answer'?'С ответом':'С решением'):'Условие'}</span><ArrowRight size={19}/></div></button></div>)}</div>
+  <div className="material-list">{!q.trim()&&data?.results.map((problem:any)=><div className="material-item" key={problem.id}><button className="material-card" onClick={()=>openMaterial('/materials/problem/'+problem.id)}><span className="material-index">{problem.public_id}</span><div className="material-body"><div className="material-title"><h3>{problem.title}</h3><Badge tone="green">{problem.source||'В банке'}</Badge></div><p>{problem.statement}</p><div className="material-tags">{problem.topics.map((id:string)=><Badge key={id}>{topics.find((node:Topic)=>node.id===id)?.name||'Тема'}</Badge>)}{problem.tags.map((item:any)=><Badge tone="cream" key={item.id}>{item.name}</Badge>)}</div></div><div className="material-tail"><span>{problem.solution!==undefined?(problem.solution_kind==='answer'?'С ответом':'С решением'):'Условие'}</span><ArrowRight size={19}/></div></button></div>)}</div>
   {!q.trim()&&data&&!data.results.length&&<Empty title="Ничего не найдено" description="Измените запрос или выберите другую ветку тем."/>}
   {!q.trim()&&data&&pages>1&&<div className="users-pagination"><button className="btn secondary" disabled={page===1} onClick={()=>setPage(page-1)}>← Назад</button><span>Страница {page} из {pages}</span><button className="btn secondary" disabled={page>=pages} onClick={()=>setPage(page+1)}>Далее →</button></div>}
  </>;
@@ -389,6 +414,17 @@ function Editor({modal,close}:any){const {user,tags,topics,refresh,toast,setUser
  {kind==='roles'&&<label>Роли аккаунта<div className="checkbox-tags">{Object.entries(roleNames).map(([r,label])=><label key={r}><input type="checkbox" checked={d.roles.includes(r)} onChange={()=>setD({...d,roles:d.roles.includes(r)?d.roles.filter((x:string)=>x!==r):[...d.roles,r]})}/>{label}</label>)}</div></label>}
  </div>{error&&<Status error={error}/>}<div className="modal-footer"><button type="button" className="btn secondary" onClick={close}>Отмена</button><button className="btn primary" disabled={busy||uploads>0}>{busy?<Loader2 className="spin" size={17}/>:<Check size={17}/ >}{kind==='worksheet'?'Сохранить личный листок':kind==='problem'?'Опубликовать':kind==='invite'?'Создать приглашения':kind==='tag'?'Создать тег':'Сохранить'}</button></div></form></div>
 }
-function CopyButton({data,kind}:any){const {setModal,refresh,toast}=useApp();const [busy,setBusy]=useState(false);return <button disabled={busy} className="btn secondary" onClick={async()=>{if(kind!=='worksheet'){setModal({kind,data});return}setBusy(true);try{const copy=await api('/worksheets/'+(data.worksheet_id||data.id)+'/copy','POST',{});setModal(null);refresh();go('/worksheets/'+copy.document_id);toast('Личная копия создана')}catch(error:any){toast(error.message)}finally{setBusy(false)}}}>{busy?<Loader2 className="spin" size={16}/>:<Copy size={16}/>}Создать копию</button>}
+function CopyButton({data,kind}:any){
+ const {user,route,setModal,refresh,toast}=useApp();
+ const [busy,setBusy]=useState(false);
+ const copy=useMemo(()=>createWorksheetCopy({
+  copy:id=>api('/worksheets/'+id+'/copy','POST',{}),
+  onCopied:reply=>{setModal(null);refresh();go('/worksheets/'+reply.document_id);toast('Личная копия создана')},
+  onError:toast,
+  onBusy:setBusy,
+ }),[user.id,route,data,kind,setModal,refresh,toast]);
+ useLayoutEffect(()=>{setBusy(false);return()=>copy.cancel()},[copy]);
+ return <button disabled={busy} className="btn secondary" onClick={()=>kind==='worksheet'?copy.run(data.worksheet_id||data.id):setModal({kind,data})}>{busy?<Loader2 className="spin" size={16}/>:<Copy size={16}/>}Создать копию</button>
+}
 
 createRoot(document.getElementById('root')!).render(<App/>);

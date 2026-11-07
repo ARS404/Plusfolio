@@ -4,12 +4,13 @@ from tempfile import TemporaryDirectory
 from unittest import skipUnless
 from unittest.mock import patch
 from django.core.management import call_command
-from django.db import connection
+from django.db import IntegrityError,connection
 from django.test import TestCase,TransactionTestCase,override_settings
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 from rest_framework.test import APIClient
 from . import services as s
-from .models import User, Circle, CircleTeacher, Enrollment, Problem, Worksheet, WorksheetItem, WorksheetIssue, WorksheetDocument, Assignment, Topic, Tag, Solve, Discussion
+from .models import User, Student, Circle, CircleTeacher, Enrollment, Problem, Worksheet, WorksheetItem, WorksheetIssue, WorksheetDocument, Assignment, Topic, Tag, Solve, Discussion
 
 
 @override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
@@ -161,6 +162,84 @@ class StreamingBackupTests(TransactionTestCase):
                 self.assertEqual(set(manifest['files']),{'.local/demo.sqlite3','.local/app.key','.local/tools/tectonic','large.bin'})
                 restore_bundle(bundle,local/'backup.key',Path(directory)/'restored')
             self.assertEqual((Path(directory)/'restored/large.bin').read_bytes(),source.read_bytes())
+
+
+@override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'])
+class AssignmentFanoutTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin=User.objects.create_user('assignment-admin@example.test','unused',name='Assignment admin',roles=['admin'])
+        cls.circle=Circle.objects.create(name='Assignment history',created_by=cls.admin)
+        account=User.objects.create_user('assignment-pupil@example.test','unused',name='Assignment pupil',roles=['student'])
+        cls.student=Student.objects.create(user=account)
+        documents=[WorksheetDocument(author=cls.admin) for _ in range(1201)]
+        WorksheetDocument.objects.bulk_create(documents)
+        worksheets=[Worksheet(document=document,title='Historical worksheet',author=cls.admin) for document in documents]
+        Worksheet.objects.bulk_create(worksheets)
+        cls.issues=[WorksheetIssue(circle=cls.circle,worksheet=worksheet,document=document,
+                                  number=index,issued_on=timezone.localdate(),issued_by=cls.admin)
+                    for index,(document,worksheet) in enumerate(zip(documents,worksheets),1)]
+        WorksheetIssue.objects.bulk_create(cls.issues)
+
+    def enrolled_students(self,count):
+        accounts=[User(email=f'cohort-{index}@example.test',name=f'Cohort {index}',roles=['student']) for index in range(count)]
+        User.objects.bulk_create(accounts)
+        students=[Student(user=account) for account in accounts];Student.objects.bulk_create(students)
+        Enrollment.objects.bulk_create([Enrollment(circle=self.circle,student=student) for student in students])
+        return students
+
+    def published_worksheet(self):
+        document=WorksheetDocument.objects.create(author=self.admin)
+        worksheet=Worksheet.objects.create(document=document,title='New worksheet',author=self.admin,published=True)
+        WorksheetDocument.objects.filter(pk=document.pk).update(current_revision=worksheet)
+        return worksheet
+
+    def test_joining_a_large_history_bounds_models_and_preserves_existing_assignments(self):
+        Assignment.objects.bulk_create([Assignment(issue=issue,student=self.student) for issue in self.issues[:73]])
+        before=dict(Assignment.objects.filter(student=self.student).values_list('pk','assigned_at'))
+        create=Assignment.objects.bulk_create;batch_sizes=[]
+        def record_batch(objects,**options):
+            batch_sizes.append(len(objects))
+            return create(objects,**options)
+        with patch.object(Assignment.objects,'bulk_create',side_effect=record_batch):
+            s.assign_issues(self.student,self.circle.issues.all())
+        self.assertEqual(Assignment.objects.filter(student=self.student).count(),len(self.issues))
+        self.assertEqual(sum(batch_sizes),len(self.issues)-len(before))
+        self.assertGreater(len(batch_sizes),1)
+        self.assertLessEqual(max(batch_sizes),s.ASSIGNMENT_BATCH_SIZE)
+        self.assertEqual(dict(Assignment.objects.filter(pk__in=before).values_list('pk','assigned_at')),before)
+        with patch.object(Assignment.objects,'bulk_create') as create_again:
+            s.assign_issues(self.student,self.circle.issues.all())
+        create_again.assert_not_called()
+
+    def test_issuing_to_a_large_cohort_bounds_models_and_excludes_former_members(self):
+        students=self.enrolled_students(1201)
+        Enrollment.objects.filter(student=students[-1]).update(left_at=timezone.now())
+        worksheet=self.published_worksheet()
+        create=Assignment.objects.bulk_create;batch_sizes=[]
+        def record_batch(objects,**options):
+            batch_sizes.append(len(objects))
+            return create(objects,**options)
+        with patch.object(Assignment.objects,'bulk_create',side_effect=record_batch):
+            issue=s.issue_worksheet(self.admin,self.circle,worksheet.pk,timezone.localdate())
+        self.assertEqual(Assignment.objects.filter(issue=issue).count(),len(students)-1)
+        self.assertFalse(Assignment.objects.filter(issue=issue,student=students[-1]).exists())
+        self.assertEqual(sum(batch_sizes),len(students)-1)
+        self.assertGreater(len(batch_sizes),1)
+        self.assertLessEqual(max(batch_sizes),s.ASSIGNMENT_BATCH_SIZE)
+
+    def test_late_assignment_failure_rolls_back_the_issue_and_earlier_batches(self):
+        students=self.enrolled_students(5);worksheet=self.published_worksheet()
+        create=Assignment.objects.bulk_create;calls=0
+        def fail_second_batch(objects,**options):
+            nonlocal calls
+            calls+=1
+            if calls==2:raise IntegrityError('Synthetic assignment failure')
+            return create(objects,**options)
+        with patch.object(s,'ASSIGNMENT_BATCH_SIZE',2),patch.object(Assignment.objects,'bulk_create',side_effect=fail_second_batch):
+            with self.assertRaises(IntegrityError):s.issue_worksheet(self.admin,self.circle,worksheet.pk,timezone.localdate())
+        self.assertFalse(WorksheetIssue.objects.filter(worksheet=worksheet).exists())
+        self.assertFalse(Assignment.objects.filter(student__in=students).exists())
 
 
 class SearchSynchronizationBudgetTests(TestCase):

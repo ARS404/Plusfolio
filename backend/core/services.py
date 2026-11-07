@@ -1,5 +1,6 @@
 import base64, hashlib, json, secrets
 from datetime import timedelta
+from itertools import batched
 from uuid import UUID
 from cryptography.fernet import Fernet
 from django.conf import settings
@@ -16,6 +17,7 @@ from .models import (
 )
 
 RANK={'student':1,'teacher':2,'analyst':3,'admin':4}
+ASSIGNMENT_BATCH_SIZE = 500
 def admin(user): return 'admin' in user.roles
 def require(value,message='Недостаточно прав.'):
     if not value: raise PermissionDenied(message)
@@ -259,9 +261,15 @@ def enroll(user,circle,email='',student_id=None):
     return membership
 
 def assign_issues(student,issues):
-    issue_ids=list(issues.values_list('pk',flat=True))
-    assigned=set(Assignment.objects.filter(student=student,issue_id__in=issue_ids).values_list('issue_id',flat=True))
-    Assignment.objects.bulk_create([Assignment(student=student,issue_id=pk) for pk in issue_ids if pk not in assigned],ignore_conflicts=True)
+    assigned=Assignment.objects.filter(student=student,issue_id=OuterRef('pk'))
+    missing=issues.filter(~Exists(assigned)).order_by('pk')
+    last_issue=0
+    # Finish each read before writing assignments. Keyset pages stay bounded
+    # and do not depend on a live cursor observing changes to its own subquery.
+    while issue_ids:=list(missing.filter(pk__gt=last_issue).values_list('pk',flat=True)[:ASSIGNMENT_BATCH_SIZE]):
+        Assignment.objects.bulk_create(
+            [Assignment(student=student,issue_id=pk) for pk in issue_ids],ignore_conflicts=True)
+        last_issue=issue_ids[-1]
 
 @transaction.atomic
 def update_student(user,circle,student_id,data):
@@ -313,7 +321,9 @@ def issue_worksheet(user,circle,worksheet_id,issued_on):
     if WorksheetIssue.objects.filter(circle=circle,document_id=worksheet.document_id).exists():raise ValidationError('Этот листок уже выдан кружку.')
     number=(circle.issues.aggregate(last=Max('number'))['last'] or 0)+1
     issue=WorksheetIssue.objects.create(circle=circle,worksheet=worksheet,document_id=worksheet.document_id,issued_on=issued_on,issued_by=user,number=number)
-    Assignment.objects.bulk_create([Assignment(issue=issue,student_id=pk) for pk in circle.enrollments.filter(left_at=None).values_list('student_id',flat=True)])
+    students=circle.enrollments.filter(left_at=None).order_by('pk').values_list('student_id',flat=True)
+    for student_ids in batched(students.iterator(),ASSIGNMENT_BATCH_SIZE):
+        Assignment.objects.bulk_create([Assignment(issue=issue,student_id=pk) for pk in student_ids])
     audit(user,'worksheet.issue',{'worksheet':str(worksheet.pk)},circle)
     return issue
 

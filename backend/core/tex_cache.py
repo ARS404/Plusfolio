@@ -3,12 +3,14 @@ from contextlib import contextmanager
 import fcntl,json,os,re,time
 from pathlib import Path
 from uuid import uuid4
+from .tex_project import MAX_PDF_BYTES
 
 
 class ArtifactCache:
-    def __init__(self,directory,suffix,max_bytes,max_entries,max_age):
+    def __init__(self,directory,suffix,max_bytes,max_entries,max_age,*,max_artifact_bytes=None):
         self.directory=Path(directory);self.suffix=suffix
         self.max_bytes=max(0,int(max_bytes));self.max_entries=max(0,int(max_entries));self.max_age=max(0,int(max_age))
+        self.max_artifact_bytes=min(self.max_bytes,self.max_bytes if max_artifact_bytes is None else max(0,int(max_artifact_bytes)))
         self.pattern=re.compile(r'[0-9a-f]{64}\.'+re.escape(suffix))
 
     @contextmanager
@@ -33,7 +35,7 @@ class ArtifactCache:
             if self.pattern.fullmatch(path.name):
                 side=path.with_suffix('.json')
                 size=info.st_size+(side.stat().st_size if side.is_file() and not side.is_symlink() else 0)
-                if now-info.st_mtime>self.max_age or not self.max_entries or size>self.max_bytes:
+                if now-info.st_mtime>self.max_age or not self.max_entries or size>self.max_bytes or info.st_size>self.max_artifact_bytes:
                     self._remove(path);removed+=1
                 else:entries.append((info.st_mtime,path,size))
             elif now-info.st_mtime>3600 and (re.fullmatch(r'[0-9a-f]{64}\.[0-9a-f]+\.tmp',path.name) or
@@ -52,7 +54,10 @@ class ArtifactCache:
         with self.locked():
             self._prune();path=self.directory/(digest+'.'+self.suffix)
             if not path.is_file() or path.is_symlink():return None
-            payload=path.read_bytes();metadata={}
+            with path.open('rb') as source:payload=source.read(self.max_artifact_bytes+1)
+            if len(payload)>self.max_artifact_bytes:
+                self._remove(path);return None
+            metadata={}
             side=path.with_suffix('.json')
             if side.is_file() and not side.is_symlink() and side.stat().st_size<=100000:
                 try:
@@ -66,7 +71,7 @@ class ArtifactCache:
 
     def put(self,digest,payload,metadata=None):
         if not re.fullmatch(r'[0-9a-f]{64}',digest):raise ValueError('Invalid artifact digest')
-        if not self.max_entries or not self.max_age or len(payload)>self.max_bytes:return False
+        if not self.max_entries or not self.max_age or len(payload)>self.max_artifact_bytes:return False
         with self.locked():
             path=self.directory/(digest+'.'+self.suffix)
             temporary=self.directory/(digest+'.'+uuid4().hex+'.tmp')
@@ -83,7 +88,7 @@ class ArtifactCache:
 def pdf_cache():
     from django.conf import settings
     return ArtifactCache(settings.LOCAL_DIR/'pdf-cache','pdf',getattr(settings,'PDF_CACHE_MAX_BYTES',128*1024*1024),
-                         getattr(settings,'PDF_CACHE_MAX_FILES',256),getattr(settings,'PDF_CACHE_MAX_AGE',7*86400))
+                         getattr(settings,'PDF_CACHE_MAX_FILES',256),getattr(settings,'PDF_CACHE_MAX_AGE',7*86400),max_artifact_bytes=MAX_PDF_BYTES)
 
 
 def toolchain_cache():

@@ -223,7 +223,7 @@ def run(args):
         print('Save .deploy/backup.key separately; encrypted backups and retention are running.')
     elif args.command=='import-images':
         server_host.tools_ready();operate(args,values)
-    elif args.command in {'status','logs','backup','prune-backups','download-backup','export-images','restore-database','stop','version','mail-limit'}:
+    elif args.command in {'status','logs','backup','prune-backups','download-backup','export-images','restore-database','stop','version','mail-limit','tex-cache'}:
         server_host.tools_ready()
         server_host.project_containers(docker,values,ROOT)
         operate(args,values)
@@ -236,6 +236,7 @@ def operate(args,values):
     if args.command=='version':
         compose('exec','-T','web','python','-c',INSTALLED_VERSION_CODE)
     elif args.command=='status':compose('ps')
+    elif args.command=='tex-cache':compose('exec','-T','web','python','backend/manage.py','tex_cache')
     elif args.command=='mail-limit':compose('exec','-T','web','python','backend/manage.py','mail_limit',*(['--set',str(args.limit)] if args.limit is not None else []))
     elif args.command=='logs':compose('logs','--tail','80',*(args.services or []))
     elif args.command=='backup':compose('exec','-T','backup','python','scripts/server_backup.py')
@@ -301,7 +302,7 @@ if __name__=='__main__':
     update=sub.add_parser('update');update.add_argument('--no-build',action='store_true');update.add_argument('--release',type=Path)
     publish=sub.add_parser('publish-images');publish.add_argument('--registry',required=True);publish.add_argument('--output',type=Path,required=True);publish.add_argument('--platform',default='linux/amd64');publish.add_argument('--cache-registry')
     fetch=sub.add_parser('fetch-backup');fetch.add_argument('uri');fetch.add_argument('file',type=Path);fetch.add_argument('--config',help='Private recovery JSON containing backup_s3 settings')
-    for name in ['up','status','backup','prune-backups','stop','doctor','check-public','version']:sub.add_parser(name)
+    for name in ['up','status','backup','prune-backups','stop','doctor','check-public','version','tex-cache']:sub.add_parser(name)
     mail=sub.add_parser('mail-limit');mail.add_argument('--set',type=int,dest='limit')
     proxy=sub.add_parser('proxy-config');proxy.add_argument('kind',choices=['nginx','caddy','traefik'])
     logs=sub.add_parser('logs');logs.add_argument('services',nargs='*')

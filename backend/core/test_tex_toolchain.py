@@ -33,16 +33,18 @@ class PortableToolchainTests(SimpleTestCase):
         with TemporaryDirectory() as directory:
             root=Path(directory);resources=self.prepared_fixture(root)
             original=(resources/PREPARATION_FILE).read_bytes()
-            for change in ['missing receipt','missing tcolorbox','changed template','new resource']:
+            for change in ['missing receipt','missing tcolorbox','changed template','changed preparation runtime','new resource']:
                 with self.subTest(change=change):
                     if change=='missing receipt':(resources/PREPARATION_FILE).unlink()
                     elif change=='missing tcolorbox':(resources/'tcolorbox.sty').unlink()
                     elif change=='changed template':(root/'backend/core/tex_templates/math-a4-v2.tex').write_text('updated template')
+                    elif change=='changed preparation runtime':(root/'backend/core/tex_runtime.py').write_text('updated runtime')
                     else:(resources/'unexpected.sty').write_text('unexpected')
                     with self.assertRaises(CompilerUnavailable):build_contract(root,resources)
                     (resources/PREPARATION_FILE).write_bytes(original)
                     (resources/'tcolorbox.sty').write_bytes(b'trusted package')
                     (root/'backend/core/tex_templates/math-a4-v2.tex').write_text('trusted source')
+                    (root/'backend/core/tex_runtime.py').write_text('trusted source')
                     (resources/'unexpected.sty').unlink(missing_ok=True)
             build_contract(root,resources)
 

@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Streaming authenticated age backups: database, source, runtime, model and configuration."""
-import argparse,fcntl,hashlib,io,json,os,re,stat,subprocess,sys,tarfile,time
+import argparse,fcntl,hashlib,io,json,os,re,shutil,stat,subprocess,sys,tarfile,time
 from datetime import datetime,timezone
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import gettempdir
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'scripts'))
 sys.path.insert(0,str(ROOT/'backend'))
 from core.tex_resources import trusted_paths
+from core.tex_runtime import job_directory,prune_jobs
 ARCHIVE_NAME=r'plusfolio-\d{8}T\d{12}Z\.tar\.gz\.age'
+INTERRUPTED_BACKUP_GRACE_SECONDS=86400
 
 
 class HashedReader:
@@ -44,8 +46,25 @@ def prune_backups(directory,policy=None,now=None):
     for path in Path(directory).iterdir():
         if re.fullmatch(r'plusfolio-\d{8}T\d{12}Z\.tar\.gz\.partial',path.name):
             info=path.lstat()
-            if stat.S_ISREG(info.st_mode) and info.st_mtime<now-86400:path.unlink()
+            if stat.S_ISREG(info.st_mode) and info.st_mtime<now-INTERRUPTED_BACKUP_GRACE_SECONDS:path.unlink()
     return {'removed':removed,'kept':len(keep),'bytes':used}
+
+
+def prune_backup_scratch(directory,now=None):
+    """Reclaim our interrupted dump workspaces while holding directory/.backup.lock.
+
+    The lock excludes active legacy dump jobs, which had no individual lease.
+    Only old, directly owned directories in their exact namespace are removed;
+    links and unrelated paths remain untouched. New workspaces also carry leases.
+    """
+    directory=Path(directory);now=time.time() if now is None else now
+    removed=prune_jobs(directory/'.dump-jobs')['removed']
+    for path in directory.iterdir():
+        if not re.fullmatch(r'\.plusfolio-dump-[a-z0-9_]{8}',path.name):continue
+        info=path.lstat()
+        if stat.S_ISDIR(info.st_mode) and info.st_uid==os.geteuid() and info.st_mtime<now-INTERRUPTED_BACKUP_GRACE_SECONDS:
+            shutil.rmtree(path);removed+=1
+    return {'removed':removed}
 
 
 def backup(*,retry_pending=False):
@@ -55,6 +74,7 @@ def backup(*,retry_pending=False):
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:
             print('Backup already running; nothing changed.',flush=True);return None
+        prune_backup_scratch(directory)
         try:os.nice(10)
         except OSError:pass
         pending=directory/'.upload-pending';result=None
@@ -81,6 +101,7 @@ def backup(*,retry_pending=False):
 
 
 def _backup():
+    """Write a complete encrypted snapshot; caller must hold /backups/.backup.lock."""
     recipient=os.environ.get('BACKUP_RECIPIENT','')
     if not recipient.startswith('age1'):raise RuntimeError('BACKUP_RECIPIENT is required')
     directory=Path('/backups');directory.mkdir(exist_ok=True)
@@ -88,8 +109,8 @@ def _backup():
     target=directory/f'plusfolio-{stamp}.tar.gz.age';temporary=target.with_suffix('.partial')
     from release import build_metadata
     manifest={'release':build_metadata(ROOT),'format':'plusfolio-server-v1','created_at':datetime.now(timezone.utc).isoformat(),'files':{},'image':os.environ.get('RELEASE_ID','local-build')}
-    with TemporaryDirectory(prefix='.plusfolio-dump-',dir=directory) as scratch:
-        dump=Path(scratch)/'database.dump'
+    with job_directory(directory/'.dump-jobs') as scratch:
+        dump=scratch/'database.dump'
         env=os.environ.copy();env['PGPASSWORD']=Path(env['POSTGRES_PASSWORD_FILE']).read_text().strip()
         with dump.open('wb') as stream:
             subprocess.run(['pg_dump','--host',env['POSTGRES_HOST'],'--username',env['POSTGRES_USER'],'--dbname',env['POSTGRES_DB'],'--format=custom','--no-owner'],env=env,stdout=stream,stderr=subprocess.PIPE,check=True)
@@ -99,9 +120,9 @@ def _backup():
                 if path.is_file() and not path.is_symlink() and '__pycache__' not in path.parts and path.suffix!='.pyc':paths['source/'+str(path.relative_to(ROOT))]=path
         for name in ['README.md','CHANGELOG.md','release.json','compose.yml','.dockerignore','.gitignore','requirements.lock','requirements-server.lock','requirements-tex.lock','requirements.txt']:
             paths['source/'+name]=ROOT/name
-        for name,directory in trusted_paths(ROOT).items():
-            for path in directory.rglob('*'):
-                if path.is_file() and not path.is_symlink():paths['source/.local/'+name+'/'+str(path.relative_to(directory))]=path
+        for name,resources in trusted_paths(ROOT).items():
+            for path in resources.rglob('*'):
+                if path.is_file() and not path.is_symlink():paths['source/.local/'+name+'/'+str(path.relative_to(resources))]=path
         for path in Path('/model').rglob('*'):
             if path.is_file() and not path.is_symlink():paths['model/'+str(path.relative_to('/model'))]=path
         # The decrypting key is deliberately excluded. Keep it outside the server too.
@@ -135,8 +156,9 @@ def _backup():
 
 
 def verify(path,key,into=None,empty_output=False):
-    with TemporaryDirectory(prefix='plusfolio-verify-') as scratch:
-        tar=Path(scratch)/'decrypted.tar.gz'
+    """Validate every archive member before restoring, cleaning leased decrypted scratch."""
+    with job_directory(Path(gettempdir())/'plusfolio-backup-verify') as scratch:
+        tar=scratch/'decrypted.tar.gz'
         with tar.open('wb') as stream:
             subprocess.run(['age','--decrypt','--identity',str(key),str(path)],stdout=stream,stderr=subprocess.PIPE,check=True)
         with tarfile.open(tar,'r:gz') as archive:
@@ -169,12 +191,14 @@ def verify(path,key,into=None,empty_output=False):
             return manifest
 
 
-if __name__=='__main__':
+def main(argv=None):
+    """Run backup, verification or pruning with the same lock and cleanup rules."""
     parser=argparse.ArgumentParser();parser.add_argument('--watch',action='store_true');parser.add_argument('--verify',type=Path);parser.add_argument('--key',type=Path);parser.add_argument('--into',type=Path);parser.add_argument('--empty-output',action='store_true');parser.add_argument('--prune-only',action='store_true')
-    args=parser.parse_args()
+    args=parser.parse_args(argv)
     if args.prune_only:
         with Path('/backups/.backup.lock').open('a') as lock:
             fcntl.flock(lock,fcntl.LOCK_EX)
+            prune_backup_scratch(Path('/backups'))
             print(json.dumps(prune_backups(Path('/backups'))))
     elif args.verify:
         if not args.key:parser.error('--key required')
@@ -191,3 +215,6 @@ if __name__=='__main__':
             if not args.watch:break
             # Retrying an older snapshot must not postpone the next daily dump.
             time.sleep(max(0,result.stat().st_mtime+int(os.environ.get('BACKUP_INTERVAL','86400'))-time.time()) if result else 2)
+
+
+if __name__=='__main__':main()

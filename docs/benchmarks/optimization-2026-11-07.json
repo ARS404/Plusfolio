@@ -1,0 +1,143 @@
+{
+  "date": "2026-11-07",
+  "baseline_revision": "7d1b33a0b77a9c7875d739114f3aaaabb9468e0a",
+  "scope": "Local uncommitted optimization/cleanup, version 1.0.5 unchanged; no deployment or publication.",
+  "platform": {
+    "os": "Darwin",
+    "machine": "arm64",
+    "database": "SQLite for local domain tests"
+  },
+  "rounds": [
+    "optimization1: three owners",
+    "cleanup1: three owners",
+    "optimization2: independent cross-review and fixes",
+    "cleanup2: final readability/documentation/convergence review"
+  ],
+  "assignment_history": {
+    "scope": "Actual assignment creation and repeated synchronization on 1201-issue synthetic history; disposable local SQLite DB, no server workload. Each function measured once; timings are diagnostic, not an end-to-end SLA.",
+    "before": {
+      "seconds": 0.073014,
+      "peak_bytes": 1281821,
+      "retained_bytes": 463934,
+      "idempotent_queries": 2
+    },
+    "after": {
+      "seconds": 0.070428,
+      "peak_bytes": 832705,
+      "retained_bytes": 395226,
+      "idempotent_queries": 1
+    },
+    "peak_reduction_percent": 35.0
+  },
+  "choice_memory": {
+    "scenario": "1000 filter pages × 100 new options, one selected missing choice",
+    "retained_before": 100001,
+    "retained_after": 101,
+    "policy": "current options plus selected absent values; committed labels only"
+  },
+  "tex_export": {
+    "contract_id": "58cb607156874c974024f064bf96e166974dd422d72371161e51abbfc83399be",
+    "archive_bytes": 13506721,
+    "downloads": 48,
+    "concurrency": 8,
+    "seconds": 6.302,
+    "python_cold_peak_bytes": 5649128,
+    "python_warm_current_bytes": 1124508,
+    "python_retained_delta_bytes": 31646,
+    "python_concurrent_extra_peak_bytes": 10430760,
+    "process_warm_peak_rss_bytes": 56000512,
+    "process_final_peak_rss_bytes": 66453504,
+    "digest_cache": {
+      "hits": 48600,
+      "misses": 486,
+      "maxsize": 4096,
+      "currsize": 486
+    },
+    "disk_cache": {
+      "files": 1,
+      "bytes": 13506721,
+      "removed": 0,
+      "max_bytes": 134217728,
+      "max_files": 2,
+      "max_age_seconds": 1209600
+    },
+    "partial_files": 0,
+    "every_download_identical": true
+  },
+  "pdf_verification": {
+    "contract_id": "58cb607156874c974024f064bf96e166974dd422d72371161e51abbfc83399be",
+    "prepare_runs": 2,
+    "manifest_unchanged": true,
+    "offline_resources_unchanged": true,
+    "compiled_pdfs": 2,
+    "rendered_pages": 7,
+    "visual_review": "All unique pages reviewed at 1600px; first three pages are pixel-identical between statement/solutions variants. Frames, page breaks, PNG, TikZ and numbering0 intact.",
+    "warnings": "Only three existing deprecated LaTeX hook warnings; no missing character/overfull diagnostics."
+  },
+  "interruption_regressions": [
+    "SIGKILL during snapshot leaves only leased orphan reclaimed on later setup",
+    "SIGKILL before receipt replace preserves receipt and reclaims leased staging",
+    "SIGKILL during pg_dump: next locked prune reclaims own orphan, keeps two complete backups",
+    "SIGKILL during verify decrypt: next verify reclaims own abandoned workspace"
+  ],
+  "behavior_fixes": [
+    "Group analytics no longer reports last loop student as requested subject",
+    "Late material GET cannot open former-account data after route/account change",
+    "Accepted worksheet copy POST finishes without stale UI continuation",
+    "Compose tex-cache uses installed project, overlays and runtime volume"
+  ],
+  "frontend_geometry": {
+    "task_column_px": 44,
+    "progress_bar_px": 24,
+    "student_column_px": 190,
+    "score_column_px": 56,
+    "single_source": "CSS custom properties",
+    "browser": "Native viewport 713×988, observed all task columns44px, plus SVG centered, card open/close preserved scrollY579.5; search recalculated slice and restored all12 rows."
+  },
+  "verification": {
+    "backend": {
+      "discovered": 395,
+      "passed": 391,
+      "skipped": 4,
+      "seconds": 218.249,
+      "skip_reason": "PostgreSQL-only row locks, candidate projection and trigram threshold; local suite uses SQLite."
+    },
+    "frontend": {
+      "tests": 49,
+      "passed": 49,
+      "typecheck": "passed",
+      "production_build": "passed"
+    },
+    "server_utilities": {
+      "tests": 53,
+      "passed": 53,
+      "excluded": [
+        "S3 upload integration mock requires botocore, absent from local .venv"
+      ]
+    },
+    "schema": "No migrations pending; model/lock/release metadata unchanged"
+  },
+  "reproduction": {
+    "domain": "Run core.test_performance.AssignmentFanoutTests and QueryBudgetTests in a separate PLUSFOLIO_LOCAL_DIR; report contains single-run SQLite allocation comparison, not an SLA.",
+    "frontend": "npm test; choiceMemory/materialDetail/worksheetCopy semantic regressions; npm run build.",
+    "tex": "Trusted setup; download new contract/ZIP; extract to fresh directory; --prepare --expected-contract twice; compile sample both variants. Concurrent benchmark:48 downloads,8 workers,64KiB streaming blocks, tracemalloc snapshots after GC, no response byte history retained.",
+    "server": "PYTHONPATH=deploy .venv/bin/python -m unittest deploy.test_shared_host deploy.test_capacity deploy.test_cloud_deploy.ImageTests deploy.test_cloud_deploy.StorageTests deploy.test_downloads; all remaining S3 tests except unavailable botocore case also checked."
+  },
+  "limitations": [
+    "Local tracemalloc measures Python allocations, not full database/host/container memory.",
+    "SQL driver buffering and returned response size remain deployment dependent.",
+    "Snapshot replacement uses two renames, not an atomic exchange; interruption between them requires rerun.",
+    "Interrupted leased jobs are reclaimed only on subsequent matching operation after60s; legacy owned receipt/dump temps after1day.",
+    "No real Linux Docker/PostgreSQL concurrency, dump/restore or production load run in this round; local Colima profile is broken.",
+    "No new live server mutation/audit; previous production read-only sample is documented separately in tex-export-memory-2026-11-07.json."
+  ],
+  "convergence": {
+    "independent_backend_and_frontend_reviews": "No further concrete findings in reviewed final code after fixes.",
+    "resource_round2": "No new code findings; exact limitations retained.",
+    "documentation": "Repository/module/invariant guides plus role-scoped site administration updated; relative links and anchors reviewed."
+  },
+  "artifact_cleanup": {
+    "removed": "62 MiB prepared-source duplicate after receipt, archive, memory test and PDF checks; temporary extracted projects self-cleaned.",
+    "retained": "New ZIP, PDF proof, screenshots, scripts, concise logs and JSON results outside repository."
+  }
+}

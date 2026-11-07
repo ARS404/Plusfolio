@@ -70,7 +70,7 @@ def snapshot(user, circle, selected, serialize_problem, search=''):
     group_stats=can_write or s.can_analyse_group(user,circle)
     recipients={issue.pk:[] for issue in selected}
     if group_stats:
-        for iid,sid in Assignment.objects.filter(issue_id__in=recipients,student_id__in=student_ids).values_list('issue_id','student_id'):
+        for iid,sid in Assignment.objects.filter(issue_id__in=recipients,student_id__in=student_ids).values_list('issue_id','student_id').iterator():
             recipients[iid].append(sid)
     blocks = []
     problem_ids = set()
@@ -90,8 +90,8 @@ def snapshot(user, circle, selected, serialize_problem, search=''):
             'worksheet': {'id': str(issue.worksheet_id), 'public_id':f'W-{issue.worksheet.document.number_id}', 'title': issue.worksheet.title, 'description': issue.worksheet.description,**issue_references(issue)},
             'problems': problems,
         })
-    states = Solve.objects.filter(student_id__in=student_ids, problem_id__in=problem_ids).values_list('student_id', 'problem_id', 'solved', 'version')
-    discussions = Discussion.objects.filter(circle=circle, problem_id__in=problem_ids).values_list('problem_id', 'discussed', 'solution_visible', 'version')
+    states = Solve.objects.filter(student_id__in=student_ids, problem_id__in=problem_ids).values_list('student_id', 'problem_id', 'solved', 'version').iterator()
+    discussions = Discussion.objects.filter(circle=circle, problem_id__in=problem_ids).values_list('problem_id', 'discussed', 'solution_visible', 'version').iterator()
     return {
         'circle': {'id': str(circle.pk), 'public_id':f'C-{circle.number_id}', 'name': circle.name}, 'blocks': blocks,
         'people': [{'id': sid, 'public_id':f'S-{sid}', 'user_public_id':f'U-{uid}', 'name': name, **education_info(year), 'self': uid == user.pk} for sid,uid,name,year in people],

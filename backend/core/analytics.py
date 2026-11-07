@@ -183,15 +183,15 @@ def report(user, params, *, student=None):
     percentages = []
     distribution = [{'label': label, 'count': 0} for label in ['0%', '<25%', '25–<50%', '50–<75%', '75–<100%', '100%']]
     students_completed = students_with_solves = 0
-    for student in Student.objects.filter(pk__in=student_ids).select_related('user').only('id','graduation_year','user__id','user__name').order_by('user__name'):
-        assigned = student_assigned[student.pk]; count = student_solved[student.pk]
+    for pupil in Student.objects.filter(pk__in=student_ids).select_related('user').only('id','graduation_year','user__id','user__name').order_by('user__name'):
+        assigned = student_assigned[pupil.pk]; count = student_solved[pupil.pk]
         raw = 100*count/assigned
         percentages.append(raw); students_with_solves += bool(count); students_completed += count == assigned
         bucket = 0 if not count else 5 if count == assigned else 1 if raw < 25 else 2 if raw < 50 else 3 if raw < 75 else 4
         distribution[bucket]['count'] += 1
         if group_ids:
-            student_rows.append({'id': student.pk, 'public_id':f'S-{student.pk}', 'user_public_id':f'U-{student.user_id}', 'name': student.user.name, **student.education_info(),
-                                 'assigned': assigned, 'solved': count, 'remaining': assigned-count, 'available':student_available[student.pk], 'discussed_unsolved':student_blocked[student.pk], 'percent': round(raw, 1)})
+            student_rows.append({'id': pupil.pk, 'public_id':f'S-{pupil.pk}', 'user_public_id':f'U-{pupil.user_id}', 'name': pupil.user.name, **pupil.education_info(),
+                                 'assigned': assigned, 'solved': count, 'remaining': assigned-count, 'available':student_available[pupil.pk], 'discussed_unsolved':student_blocked[pupil.pk], 'percent': round(raw, 1)})
 
     # Ancestors roll up each unique student/task pair once, even with overlapping topics.
     nodes = {node['id']: node for node in Topic.objects.values('id', 'number_id', 'name', 'parent_id')} if selected_ids else {}

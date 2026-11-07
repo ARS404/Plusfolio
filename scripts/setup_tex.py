@@ -5,7 +5,8 @@ from pathlib import Path
 from download_asset import download
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'backend'))
-from core.tex_resources import record_preparation
+from core.tex_resources import record_preparation,resource_files
+from core.tex_runtime import job_directory
 VERSION='0.17.0'
 ASSETS={
  ('Darwin','arm64'):('aarch64-apple-darwin','a3f1cac7c5678f01661a92212f58480ae3b0634115d880dbc59e2953ded45667'),
@@ -29,6 +30,31 @@ def install_compiler(asset,binary,digest):
   if temporary is not None:temporary.unlink(missing_ok=True)
 
 
+def copy_resources(source,destination):
+ """Replace resources from regular files, retaining the old cache on ordinary failure.
+
+ Snapshot jobs stay on the destination filesystem and use leases so later setup
+ calls can reclaim interrupted copies without deleting another active setup.
+ The two renames are not an atomic exchange: SIGKILL between them requires a rerun.
+ """
+ files=resource_files(source)  # Check count/bytes before allocating a snapshot or copying data.
+ destination=Path(destination);destination.parent.mkdir(parents=True,exist_ok=True)
+ with job_directory(destination.parent/'.tex-resource-jobs') as directory:
+  snapshot=directory/'cache';snapshot.mkdir()
+  previous=directory/'previous'
+  for name,path in files.items():
+   target=snapshot/name;target.parent.mkdir(parents=True,exist_ok=True)
+   shutil.copy2(path,target,follow_symlinks=False)
+   if target.is_symlink():raise ValueError('TeX resource changed while copying')
+  had_previous=destination.exists() or destination.is_symlink()
+  try:
+   if had_previous:destination.replace(previous)
+   snapshot.replace(destination)
+  except BaseException:
+   if previous.exists() or previous.is_symlink():previous.replace(destination)
+   raise
+
+
 def main(argv=None):
  parser=argparse.ArgumentParser(description=__doc__)
  parser.add_argument('--offline',action='store_true',help='Validate bundled resources in a temporary copy; never download or modify them.')
@@ -47,21 +73,21 @@ def main(argv=None):
  cache=Path(os.environ.get('PLUSFOLIO_TEX_SHARED_CACHE',str(frozen_cache)));config=ROOT/'.local/tectonic-config'
  cache.mkdir(parents=True,exist_ok=True);config.mkdir(exist_ok=True)
  if args.offline:
-  with tempfile.TemporaryDirectory(prefix='plusfolio-tex-offline-') as directory:
-   isolated=Path(directory)/'cache';shutil.copytree(frozen_cache,isolated)
+  with job_directory(ROOT/'.local/tex-setup-jobs') as directory:
+   isolated=directory/'cache';copy_resources(frozen_cache,isolated)
    prepare_templates(binary,isolated,config,offline=True)
  else:
   prepare_templates(binary,cache,config)
-  if cache.resolve()!=frozen_cache.resolve():shutil.copytree(cache,frozen_cache,dirs_exist_ok=True)
+  if cache.resolve()!=frozen_cache.resolve():copy_resources(cache,frozen_cache)
   record_preparation(ROOT,frozen_cache)
  total=sum(path.stat().st_size for path in frozen_cache.rglob('*') if path.is_file())
  print(json.dumps({'compiler':version,'binary_mib':round(binary.stat().st_size/1024**2,1),'cache_mib':round(total/1024**2,1),'offline_check':'passed'},ensure_ascii=False))
 
 
 def prepare_templates(binary,cache,config,*,offline=False):
+ """Warm fixed trusted examples and validate both templates in a leased workspace."""
  env={'PATH':'/usr/bin:/bin','LANG':'en_US.UTF-8','TECTONIC_CACHE_DIR':str(cache),'XDG_CONFIG_HOME':str(config),'TECTONIC_UNTRUSTED_MODE':'1'}
- with tempfile.TemporaryDirectory(prefix='plusfolio-tex-setup-') as directory:
-  work=Path(directory)
+ with job_directory(ROOT/'.local/tex-setup-jobs') as work:
   template=(ROOT/'backend/core/tex_templates/math-a4-v2.tex').read_text()
   (work/'main.tex').write_text(r'\input{variables.tex}\input{template.tex}')
   (work/'template.tex').write_text(template)
@@ -73,7 +99,7 @@ def prepare_templates(binary,cache,config,*,offline=False):
     sample.write('{\\'+size+r' $x_{i_j}^{a_b}+\sqrt{\frac{x^2}{1+a_{b_c}}}+\mathbb{R}_{x_{y_z}}+\mathfrak{g}+\mathcal{A}+\square+\boldsymbol{\alpha_{i_j}}$}'+chr(10))
   (work/'solutions.tex').write_text(r'\section*{Решения}Ответ: $55$.')
   print('Warming the trusted template, Russian fonts and TikZ bundle cache...',flush=True)
-  ready=subprocess.run([str(binary),'-X','compile','--untrusted','--only-cached','main.tex'],cwd=work,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=60).returncode==0
+  ready=subprocess.run([str(binary),'-X','compile','--untrusted','--only-cached','main.tex'],cwd=work,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT,timeout=60).returncode==0
   if offline and not ready:
    raise RuntimeError('Bundled offline TeX resources are incomplete. Ask the administrator to run scripts/setup_tex.py and rebuild the toolchain archive; do not update the downloaded manifest.')
   for attempt in range(0 if ready else 3):

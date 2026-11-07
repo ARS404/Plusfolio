@@ -5,6 +5,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 from rest_framework.exceptions import APIException
+from .tex_project import MAX_PDF_BYTES,MAX_PROJECT_BYTES
 
 ROOT=Path(__file__).resolve().parent
 TEMPLATE='math-a4-v2'
@@ -113,7 +114,7 @@ def project_for(worksheet,problems,allowed_solutions=(),solutions=False,issue=No
     from .tex_project import project_files
     try:project_files(files)
     except ValueError as error:raise ValidationError(str(error))
-    if len(json.dumps(files,ensure_ascii=False).encode())>8*1024*1024:raise ValidationError('Проект с рисунками превышает 8 МиБ.')
+    if len(json.dumps(files,ensure_ascii=False).encode())>MAX_PROJECT_BYTES:raise ValidationError('Проект с рисунками превышает 8 МиБ.')
     return files
 
 
@@ -146,15 +147,14 @@ def render_pdf(project,diagnostics=None,cache=True):
     try:project_files(project)
     except ValueError as error:raise ValidationError(str(error))
     serialized=json.dumps(project,sort_keys=cache,ensure_ascii=False).encode()
-    if len(serialized)>8*1024*1024:raise ValidationError('Проект TeX превышает 8 МиБ.')
+    if len(serialized)>MAX_PROJECT_BYTES:raise ValidationError('Проект TeX превышает 8 МиБ.')
     artifacts=pdf_cache() if cache else None
     # The compiler version and complete authorized project identify the PDF, including solution masks.
     digest=hashlib.sha256(b'tectonic-0.17.0-project-v2\n'+serialized).hexdigest() if artifacts else None
-    del serialized
     if artifacts:
         try:hit=artifacts.get(digest)
         except OSError:hit=None
-        if hit and len(hit[0])<=16*1024*1024:
+        if hit and len(hit[0])<=MAX_PDF_BYTES:
             if diagnostics is not None:diagnostics.update(cache_hit=True,warnings=hit[1].get('warnings',[]))
             return hit[0]
     details=diagnostics if diagnostics is not None else {}
@@ -164,9 +164,10 @@ def render_pdf(project,diagnostics=None,cache=True):
             except OSError:pass  # A full/unwritable cache must not prevent downloading an already compiled PDF.
     if getattr(settings,'TEX_SOCKET',''):
         from .tex_remote import compile_project
-        pdf=compile_project(settings.TEX_SOCKET,project,details)
+        pdf=compile_project(settings.TEX_SOCKET,serialized,details)
         remember(pdf)
         return pdf
+    del serialized
     compiler=shutil.which(str(getattr(settings,'TEX_COMPILER',settings.LOCAL_DIR/'tools'/'tectonic')))
     if not compiler:raise CompilerUnavailable()
     if not WORKERS.acquire(blocking=False):raise CompilerUnavailable('Сборка PDF занята. Повторите через несколько секунд.')
@@ -208,8 +209,8 @@ def render_pdf(project,diagnostics=None,cache=True):
                 errors=[line for line in log.splitlines() if line.startswith(('!','error:'))]
                 detail=' '.join(errors[:2])[:350]
                 raise ValidationError('Не удалось собрать PDF. '+(detail or 'Проверьте TeX и подготовку кэша Tectonic.'))
-            payload=pdf.read_bytes()
-            if not payload.startswith(b'%PDF-') or len(payload)>16*1024*1024:raise ValidationError('Некорректный PDF.')
+            with pdf.open('rb') as source:payload=source.read(MAX_PDF_BYTES+1)
+            if not payload.startswith(b'%PDF-') or len(payload)>MAX_PDF_BYTES:raise ValidationError('Некорректный PDF.')
             remember(payload)
             return payload
     finally:WORKERS.release()

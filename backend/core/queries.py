@@ -24,7 +24,7 @@ def load_worksheet_items(worksheets):
     # Lists only need task IDs; avoid retaining full item model instances for every sheet.
     by_id={worksheet.pk:worksheet for worksheet in worksheets}
     for worksheet in worksheets:worksheet._problem_ids=[]
-    for worksheet_id,problem_id in WorksheetItem.objects.filter(worksheet_id__in=by_id).values_list('worksheet_id','problem_id'):
+    for worksheet_id,problem_id in WorksheetItem.objects.filter(worksheet_id__in=by_id).values_list('worksheet_id','problem_id').iterator():
         by_id[worksheet_id]._problem_ids.append(problem_id)
 
 

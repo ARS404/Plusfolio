@@ -100,6 +100,14 @@ class StudentProfileTests(TestCase):
             self.assertEqual(self.get(user,self.path('/analytics'),{'circle':str(self.secret.pk)}).status_code,404)
             self.assertEqual(self.get(user,self.path('/analytics'),{'include_discussed':'bad'}).status_code,400)
 
+    def test_regular_reports_do_not_name_an_individual_subject(self):
+        for user,expected_count in [(self.teacher,2),(self.analyst,2),(self.pupil,1)]:
+            with self.subTest(user=user.name):
+                result=self.get(user,'/api/analytics',{'circle':str(self.circle.pk)})
+                self.assertEqual(result.status_code,200,result.data)
+                self.assertEqual(result.data['student_count'],expected_count)
+                self.assertNotIn('subject_student_id',result.data)
+
     def test_combined_student_role_does_not_add_personal_circles_to_other_student_reports(self):
         data=self.get(self.dual,self.path()).data
         self.assertEqual({row['id'] for row in data['circles']},{str(self.circle.pk)})
@@ -116,6 +124,7 @@ class StudentProfileTests(TestCase):
         Assignment.objects.filter(issue=self.issue,student=self.pupil.student).delete()
         result=self.get(self.teacher,self.path('/analytics'))
         self.assertEqual(result.status_code,200,result.data);self.assertEqual(result.data['assigned_pairs'],0)
+        self.assertEqual(result.data['subject_student_id'],self.pupil.student.pk)
         self.assertIsNone(result.data['percent'])
 
     def test_read_only_adult_token_can_read_profile_and_report(self):

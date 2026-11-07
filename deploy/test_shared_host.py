@@ -1,5 +1,5 @@
 """Safeguards for shared deployments and retention; no server/database required."""
-import argparse,hashlib,io,json,os,socket,subprocess,sys,tarfile,tempfile,time,unittest
+import argparse,fcntl,hashlib,io,json,os,socket,subprocess,sys,tarfile,tempfile,time,unittest
 from pathlib import Path
 from unittest.mock import patch,Mock
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'scripts'))
@@ -8,6 +8,21 @@ import server,server_host,server_backup
 
 class HostTests(unittest.TestCase):
     def values(self):return server_host.shared_values({'COMPOSE_PROJECT_NAME':'plusfolio-a','INSTANCE_ID':'abc'})
+    def test_tex_cache_uses_the_installed_project_and_selected_overlays(self):
+        with tempfile.TemporaryDirectory() as temporary,patch.object(server,'STATE',Path(temporary)):
+            values={**self.values(),'RESOURCE_PROFILE':'dedicated-pilot','POSTGRES_HOST':'external-db'}
+            server.write_env(values)
+            with patch('server_host.tools_ready'),patch('server_host.project_containers') as owned,patch('server.subprocess.run',return_value=Mock()) as runner:
+                server.run(argparse.Namespace(command='tex-cache'))
+            owned.assert_called_once_with(server.docker,values,ROOT)
+            command=runner.call_args.args[0]
+            self.assertEqual(command[:5],['docker','compose','--project-name','plusfolio-a','--env-file'])
+            self.assertEqual(command[5],str(server.STATE/'env'))
+            self.assertIn(str(ROOT/'deploy/compose.dedicated-pilot.yml'),command)
+            self.assertIn(str(ROOT/'deploy/compose.external-db.yml'),command)
+            self.assertEqual(command[-6:],['exec','-T','web','python','backend/manage.py','tex_cache'])
+            self.assertEqual(runner.call_args.kwargs['cwd'],ROOT)
+
     def test_missing_tools_exit_without_package_or_daemon_commands(self):
         with patch('server_host.subprocess.run',side_effect=FileNotFoundError) as runner:
             with self.assertRaisesRegex(RuntimeError,'системные пакеты не изменялись'):server_host.tools_ready(True)
@@ -170,8 +185,92 @@ class RetentionTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):server_backup.backup()
         prune.assert_not_called()
 
+    def test_old_dump_scratch_is_removed_under_backup_lock_without_following_links(self):
+        outside=self.directory/'other-app';outside.mkdir();(outside/'keep').write_bytes(b'foreign')
+        orphan=self.directory/'.plusfolio-dump-123abcde';orphan.mkdir();(orphan/'partial.dump').write_bytes(b'partial')
+        (orphan/'nested-link').symlink_to(outside,target_is_directory=True);os.utime(orphan,(0,0))
+        link=self.directory/'.plusfolio-dump-456abcde';link.symlink_to(outside,target_is_directory=True)
+        fresh=self.directory/'.plusfolio-dump-789abcde';fresh.mkdir()
+        unrelated=self.directory/'.plusfolio-dump-unrelated';unrelated.mkdir();os.utime(unrelated,(0,0))
+        archives=[self.make(n,age=90,size=50) for n in range(1,4)]
+        with (self.directory/'.backup.lock').open('a') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX)
+            with patch('server_backup.os.geteuid',return_value=os.geteuid()+1):
+                self.assertEqual(server_backup.prune_backup_scratch(self.directory,self.now),{'removed':0})
+            self.assertEqual(server_backup.prune_backup_scratch(self.directory,self.now),{'removed':1})
+            server_backup.prune_backups(self.directory,self.policy,self.now)
+        self.assertFalse(orphan.exists());self.assertTrue(link.is_symlink());self.assertTrue(fresh.exists());self.assertTrue(unrelated.exists())
+        self.assertEqual((outside/'keep').read_bytes(),b'foreign')
+        self.assertEqual(sorted(self.directory.glob('*.age')),archives[-2:])
+
+    def test_active_backup_lock_prevents_scratch_cleanup(self):
+        orphan=self.directory/'.plusfolio-dump-123abcde';orphan.mkdir();os.utime(orphan,(0,0))
+        with (self.directory/'.backup.lock').open('a') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX)
+            with patch('server_backup.Path',side_effect=lambda value: self.directory if value=='/backups' else Path(value)),patch('server_backup.prune_backup_scratch') as prune,patch('server_backup._backup') as create,patch('builtins.print'):
+                self.assertIsNone(server_backup.backup())
+            prune.assert_not_called();create.assert_not_called();self.assertTrue(orphan.exists())
+
+    def test_failed_dump_cleans_new_workspace_and_preserves_completed_archives(self):
+        archives=[self.make(n,age=90,size=50) for n in range(1,3)]
+        password=self.directory/'synthetic-password';password.write_text('synthetic')
+        values={'BACKUP_RECIPIENT':'age1synthetic','POSTGRES_PASSWORD_FILE':str(password),'POSTGRES_HOST':'synthetic','POSTGRES_USER':'synthetic','POSTGRES_DB':'synthetic'}
+        def failed_dump(*args,**kwargs):
+            kwargs['stdout'].write(b'partial dump');raise subprocess.CalledProcessError(1,'synthetic pg_dump')
+        with patch.dict(os.environ,values),patch('release.build_metadata',return_value={}),patch('server_backup.Path',side_effect=lambda value: self.directory if value=='/backups' else Path(value)),patch('server_backup.subprocess.run',side_effect=failed_dump):
+            with self.assertRaises(subprocess.CalledProcessError):server_backup.backup()
+        self.assertEqual(list((self.directory/'.dump-jobs').iterdir()),[])
+        self.assertEqual(sorted(self.directory.glob('*.age')),archives)
+
+    def test_prune_only_cli_reclaims_interrupted_dumps_and_keeps_two_archives(self):
+        archives=[self.make(n,age=90,size=50) for n in range(1,4)]
+        password=self.directory/'synthetic-password';password.write_text('synthetic')
+        command=("import os,signal,sys;from pathlib import Path;sys.path.insert(0,sys.argv[1]);import server_backup as backup;import release\n"
+                 "root=Path(sys.argv[2]);backup.Path=lambda value:root if value=='/backups' else Path(value)\n"
+                 "os.environ.update(BACKUP_RECIPIENT='age1synthetic',POSTGRES_PASSWORD_FILE=sys.argv[3],POSTGRES_HOST='synthetic',POSTGRES_USER='synthetic',POSTGRES_DB='synthetic')\n"
+                 "release.build_metadata=lambda *args:{}\n"
+                 "def interrupted(*args,**kwargs):\n"
+                 " stream=kwargs['stdout'];stream.write(b'partial dump');stream.flush();print(stream.name,flush=True);os.kill(os.getpid(),signal.SIGKILL)\n"
+                 "backup.subprocess.run=interrupted\n"
+                 "backup.backup()")
+        killed=subprocess.run([sys.executable,'-c',command,str(ROOT/'scripts'),str(self.directory),str(password)],stdout=subprocess.PIPE,check=False)
+        self.assertLess(killed.returncode,0)
+        dump=Path(killed.stdout.decode().strip());self.assertEqual(dump.read_bytes(),b'partial dump')
+        orphan=dump.parent;os.utime(orphan,(0,0))
+        def path(value):
+            if value=='/backups':return self.directory
+            if value=='/backups/.backup.lock':return self.directory/'.backup.lock'
+            return Path(value)
+        with patch('server_backup.Path',side_effect=path),patch('server_backup.retention_policy',return_value=self.policy),patch('builtins.print'):
+            server_backup.main(['--prune-only'])
+        self.assertFalse(orphan.exists());self.assertEqual(sorted(self.directory.glob('*.age')),archives[-2:])
+
 
 class BackupVerificationTests(unittest.TestCase):
+    def test_failed_decryption_reclaims_orphans_preserves_live_lease_and_cleans_its_work(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);jobs=root/'plusfolio-backup-verify'
+            with server_backup.job_directory(jobs) as active:
+                command=("import os,signal,sys;sys.path.insert(0,sys.argv[1]);import server_backup as backup\n"
+                         "def interrupted(*args,**kwargs):\n"
+                         " stream=kwargs['stdout'];stream.write(b'abandoned plaintext');stream.flush();print(stream.name,flush=True);os.kill(os.getpid(),signal.SIGKILL)\n"
+                         "backup.gettempdir=lambda:sys.argv[2]\n"
+                         "backup.subprocess.run=interrupted\n"
+                         "backup.verify('synthetic.age','synthetic.key')")
+                killed=subprocess.run([sys.executable,'-c',command,str(ROOT/'scripts'),str(root)],stdout=subprocess.PIPE,check=False)
+                self.assertLess(killed.returncode,0)
+                plaintext=Path(killed.stdout.decode().strip());self.assertEqual(plaintext.read_bytes(),b'abandoned plaintext')
+                orphan=plaintext.parent;os.utime(orphan,(0,0));os.utime(active,(0,0))
+                outside=root/'other-app';outside.mkdir();(outside/'keep').write_bytes(b'foreign')
+                (orphan/'link').symlink_to(outside,target_is_directory=True);os.utime(orphan,(0,0))
+                def failed_decrypt(*args,**kwargs):
+                    kwargs['stdout'].write(b'partial plaintext');raise subprocess.CalledProcessError(1,'synthetic age')
+                with patch('server_backup.gettempdir',return_value=str(root)),patch('server_backup.subprocess.run',side_effect=failed_decrypt):
+                    with self.assertRaises(subprocess.CalledProcessError):server_backup.verify('synthetic.age','synthetic.key')
+                self.assertFalse(orphan.exists());self.assertTrue(active.exists());self.assertEqual((outside/'keep').read_bytes(),b'foreign')
+                self.assertEqual(list(jobs.iterdir()),[active])
+            self.assertEqual(list(jobs.iterdir()),[])
+
     def test_checks_all_members_before_creating_restore_directory(self):
         files={'database.dump':b'synthetic database','source/.deploy/env':b'synthetic configuration'}
         manifest={'format':'plusfolio-server-v1','created_at':'synthetic','files':{

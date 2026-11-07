@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
  && rm -rf /var/lib/apt/lists/*
 COPY scripts/download_asset.py scripts/download_asset.py
 COPY scripts/setup_tex.py scripts/setup_tex.py
-COPY backend/core/__init__.py backend/core/tex_resources.py backend/core/
+COPY backend/core/__init__.py backend/core/tex_resources.py backend/core/tex_runtime.py backend/core/
 COPY backend/core/tex_templates/ backend/core/tex_templates/
 RUN --mount=type=cache,id=plusfolio-tectonic-0.17.0-v33-blocks,target=/var/cache/plusfolio-tex,sharing=locked \
     PLUSFOLIO_TEX_SHARED_CACHE=/var/cache/plusfolio-tex python scripts/setup_tex.py \

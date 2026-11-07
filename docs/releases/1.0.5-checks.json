@@ -1,40 +1,36 @@
 {
   "version": "1.0.5",
   "date": "2026-11-07",
-  "scope": "Local verification before the release commit and tag; publication and CI are separate",
+  "scope": "Final local verification after optimization and cleanup; GitHub CI and publication are separate operations.",
   "release_status": "released",
   "release_tag": "v1.0.5",
-  "source_base_revision": "eb4ed6b43524d8914a1cd17fc4610c9dd083ef74",
+  "source_base_revision": "7d1b33a0b77a9c7875d739114f3aaaabb9468e0a",
+  "source_evidence": "../benchmarks/optimization-2026-11-07.json",
   "current_checks": {
     "version_and_frontend_mirrors": "synchronized",
     "expected_tag_validation": "v1.0.5 passed",
     "backend": {
-      "total": 383,
-      "passed": 379,
+      "total": 395,
+      "passed": 391,
       "skipped": 4,
-      "seconds": 218.555,
+      "seconds": 218.249,
       "suite": "core",
       "database": "isolated SQLite test database",
-      "environment": "An explicit image resource path was set, exercising fixture independence from it.",
-      "full_regression_revision": "105566b418f3b3a56d10cb19770e0e8dbf30d2d8",
-      "reuse_after_ui_refinement": "Backend, server scripts, schema and dependencies are unchanged from the full 383-test regression. Only journal/brand markup, CSS and release documentation were refined."
+      "skip_reason": "PostgreSQL-only cross-worker row locks, candidate projection and trigram threshold"
     },
-    "image_resource_fixture": {
-      "passed": 11,
-      "regression": "Four fixture failures with an inherited image cache path were reproduced and resolved by isolating the portable test class."
-    },
-    "frontend_tests_passed": 38,
+    "frontend_tests_passed": 49,
     "production_build": "passed",
-    "main_js_kb": 380.8,
+    "main_js_kb": 381.96,
     "math_js_kb": 261.06,
     "largest_js_chunk_kb": 437.62,
     "oversized_chunk_warning": false,
     "deployment_helpers": {
-      "passed": 43,
-      "scope": "Shared-host safeguards, retention/restore, capacity helpers, immutable images, storage paths and downloads; Docker calls mocked, temporary loopback port used"
+      "passed": 53,
+      "scope": "Shared-host safeguards, leased/orphan cleanup, retention/restore, capacity, images, storage and downloads; Docker calls mocked; temporary loopback socket permitted",
+      "excluded": "One S3 upload test requires botocore, absent from local development .venv"
     },
     "schema_drift": "No changes detected",
-    "migration_plan": "No planned migration operations",
+    "migration_plan": "No new migration operations; last core migration 0019_issue_edit_version",
     "dependency_graph_vs_1_0_4": "unchanged",
     "git_diff_check": "passed"
   },
@@ -53,66 +49,57 @@
     "live_database_migration_during_preparation": false
   },
   "tex_package": {
-    "contract_id": "b0b84369abcf1bc2c4c33cee9a9e09bf623be249be1108b5c4989723e0bc456d",
+    "contract_id": "58cb607156874c974024f064bf96e166974dd422d72371161e51abbfc83399be",
     "source_and_resource_files": 486,
+    "archive_bytes": 13506721,
     "all_archive_hashes_match": true,
-    "unchanged_from_verified_2026_11_07_package": true,
-    "prior_prepare_runs": 2,
-    "prior_real_pdf_variants": [
+    "canonical_sources_match_checked_archive": true,
+    "prepare_runs": 2,
+    "resources_and_manifest_unchanged_after_prepare": true,
+    "real_pdf_variants": [
       "statement",
       "with-solutions"
     ],
-    "prior_rendered_pages_reviewed": 7,
+    "rendered_pages_reviewed": 7,
     "compiler": "Tectonic 0.17.0",
-    "reuse_reason": "Every selected renderer source, document template, preparation script, documentation file and trusted resource has the identical hash. Release metadata and journal UI are outside the TeX contract."
+    "note": "Fresh receipt and archive rebuilt after preparation/runtime changes; previous contract must not be reused."
   },
   "browser_validation": {
     "task_columns_px": 44,
-    "previous_task_columns_px": 74,
     "progress_bar_px": 24,
-    "task_button_px": 28,
+    "student_column_px": 190,
+    "score_column_px": 56,
     "solve_button_px": 25,
-    "name_display": "ID only; full title in native hover tooltip and task button accessible name",
-    "open_solution": "Eye badge with hover/keyboard hint",
-    "worksheet_header_height": "unchanged",
-    "proof": "Local journal checked on 2026-11-07 after final centering and 44px-column refinement.",
-    "icon_alignment": {
-      "previous_plus_horizontal_offset_px": 1.5,
-      "plus_svg_offset_px": {
-        "x": 0,
-        "y": 0
-      },
-      "logo_svg_offset_px": {
-        "x": 0,
-        "y": 0
-      },
-      "discussion_svg_offset_px": {
-        "x": 0,
-        "y": 0
-      },
-      "native_button_padding_removed": true,
-      "brand_mark": "Shared SVG component in sidebar, login and loading screen"
-    }
+    "plus_svg_center_offset_px": {
+      "x": 0,
+      "y": 0
+    },
+    "geometry_single_source": "CSS custom properties; JSX provides only column counts",
+    "card_open_close_scroll_y_before_after": [
+      579.5,
+      579.5
+    ],
+    "search_progress_recomputed_and_restored": true,
+    "rows_restored": 12,
+    "name_display": "P-ID only; full title in hover tooltip and accessible button name",
+    "open_solution": "Eye badge with hover/keyboard hint"
   },
   "resource_verification": {
-    "report": "../benchmarks/tex-export-memory-2026-11-07.json",
-    "production_measurement": "Read-only counters from three samples; no production load, restart or deployment",
-    "export_measurement": "Local 48 streamed downloads at concurrency 8; retained Python allocation delta about 31 KiB, additional concurrency peak about 11 MiB",
-    "production_ssh_rules_restored": true
+    "report": "../benchmarks/optimization-2026-11-07.json",
+    "downloads": 48,
+    "concurrency": 8,
+    "retained_python_delta_bytes": 31646,
+    "additional_python_peak_bytes": 10430760,
+    "remaining_zip_files": 1,
+    "partial_files": 0,
+    "production_measurement": "No new deployment, load or mutation; prior read-only samples remain in tex-export-memory-2026-11-07.json"
   },
   "limitations": [
-    "Linux/Docker server build and PostgreSQL integration were not run locally: the existing plusfolio-check Colima profile is Broken. No VM repair was attempted.",
-    "Four PostgreSQL-only checks are skipped in the SQLite suite. The repository CI checks the Linux server, HTTPS, SMTP, TeX and real backup restoration after publication.",
-    "Local allocation measurements and short read-only production counter sampling are not a production load test."
-  ],
-  "ui_refinement_checks": {
-    "frontend_tests_passed": 38,
-    "production_build": "passed",
-    "main_js_kb": 380.8,
-    "all_task_columns_px": 44,
-    "progress_bar_px": 24,
-    "click_targets_unchanged": true,
-    "source_release_revision_before_refinement": "105566b418f3b3a56d10cb19770e0e8dbf30d2d8",
-    "local_tag_updated_before_publication": true
-  }
+    "Local tracemalloc measures Python allocations, not full database/host/container memory.",
+    "SQL driver buffering and returned response size remain deployment dependent.",
+    "Snapshot replacement uses two renames, not an atomic exchange; interruption between them requires rerun.",
+    "Interrupted leased jobs are reclaimed only on subsequent matching operation after60s; legacy owned receipt/dump temps after1day.",
+    "No real Linux Docker/PostgreSQL concurrency, dump/restore or production load run in this round; local Colima profile is broken.",
+    "No new live server mutation/audit; previous production read-only sample is documented separately in tex-export-memory-2026-11-07.json."
+  ]
 }
