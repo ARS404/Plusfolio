@@ -6,6 +6,7 @@ from django.db.models import Q,Exists,OuterRef
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from . import filters as f, services as s
+from .student_profiles import profile_scope
 from .models import (Assignment, Circle, CircleTeacher, Discussion, Problem, Solve,
                      Student, Topic, TopicCatalogVersion, Worksheet, WorksheetItem, WorksheetIssue)
 
@@ -183,7 +184,11 @@ def report(user, params, *, student=None):
     percentages = []
     distribution = [{'label': label, 'count': 0} for label in ['0%', '<25%', '25–<50%', '50–<75%', '75–<100%', '100%']]
     students_completed = students_with_solves = 0
-    for pupil in Student.objects.filter(pk__in=student_ids).select_related('user').only('id','graduation_year','user__id','user__name').order_by('user__name'):
+    pupils = Student.objects.filter(pk__in=student_ids).select_related('user').only('id','graduation_year','user__id','user__name').order_by('user__name')
+    # Mixed roles can add personal results outside the adult profile scope.
+    if group_ids and 'student' in user.roles and not s.admin(user):
+        pupils = pupils.annotate(can_view_profile=Exists(profile_scope(user).filter(pk=OuterRef('pk'))))
+    for pupil in pupils:
         assigned = student_assigned[pupil.pk]; count = student_solved[pupil.pk]
         raw = 100*count/assigned
         percentages.append(raw); students_with_solves += bool(count); students_completed += count == assigned
@@ -191,6 +196,7 @@ def report(user, params, *, student=None):
         distribution[bucket]['count'] += 1
         if group_ids:
             student_rows.append({'id': pupil.pk, 'public_id':f'S-{pupil.pk}', 'user_public_id':f'U-{pupil.user_id}', 'name': pupil.user.name, **pupil.education_info(),
+                                 'can_view_profile': getattr(pupil, 'can_view_profile', True),
                                  'assigned': assigned, 'solved': count, 'remaining': assigned-count, 'available':student_available[pupil.pk], 'discussed_unsolved':student_blocked[pupil.pk], 'percent': round(raw, 1)})
 
     # Ancestors roll up each unique student/task pair once, even with overlapping topics.

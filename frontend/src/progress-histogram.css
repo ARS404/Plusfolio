@@ -1,0 +1,180 @@
+.report-grid.report-progress-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.progress-histogram .panel-heading {
+  flex-wrap: wrap;
+}
+
+.histogram-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #5d6d60;
+  font-size: 12px;
+}
+
+.histogram-step select {
+  padding: 6px 8px;
+  border: 1px solid #dfe5dd;
+  border-radius: 6px;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+.histogram-body {
+  padding: 16px 20px;
+  font-size: 12px;
+}
+
+.histogram-axis-label,
+.histogram-x-label {
+  color: #647466;
+  font-size: 11px;
+}
+
+.histogram-scroll {
+  overflow-x: auto;
+}
+
+.histogram-chart {
+  min-width: calc(var(--bin-count) * 22px + 42px);
+  padding: 20px 2px 24px 40px;
+}
+
+.histogram-plot {
+  position: relative;
+  height: 160px;
+}
+
+.histogram-guide {
+  position: absolute;
+  inset-inline: 0;
+  border-top: 1px solid #e3e9df;
+}
+
+.histogram-guide span {
+  position: absolute;
+  right: calc(100% + 8px);
+  transform: translateY(-50%);
+  color: #647466;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.histogram-columns {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(calc(var(--bin-count) - 1), minmax(0, 1fr)) minmax(32px, 1fr);
+}
+
+.histogram-column {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.histogram-column:hover,
+.histogram-column[aria-pressed="true"] {
+  background: #edf3ee;
+}
+
+.histogram-column:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: -2px;
+}
+
+.histogram-bar {
+  position: absolute;
+  inset-inline: 14%;
+  bottom: 0;
+  height: var(--bar-height);
+  border-radius: 4px 4px 0 0;
+  background: #91ad7f;
+}
+
+.histogram-column:first-child .histogram-bar { background: #c5a86e; }
+.histogram-column:last-child .histogram-bar { background: #568468; }
+.histogram-column[aria-pressed="true"] .histogram-bar { background: var(--green); }
+
+.histogram-count,
+.histogram-range {
+  position: absolute;
+  inset-inline: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.histogram-count {
+  bottom: calc(var(--bar-height) + 4px);
+  font-weight: 600;
+}
+
+.histogram-range {
+  top: calc(100% + 6px);
+  color: #556859;
+}
+
+.histogram-x-label { margin: 4px 0 12px; }
+
+.histogram-detail {
+  margin: 0 0 12px;
+  padding: 9px 11px;
+  border-radius: 6px;
+  background: #f4f7f2;
+}
+
+.histogram-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  color: #647466;
+}
+
+.histogram-summary b { color: var(--ink); }
+
+.histogram-students {
+  margin: 0 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.histogram-students summary {
+  padding: 9px 11px;
+  color: var(--green);
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.histogram-students ul {
+  max-height: 16rem;
+  margin: 0;
+  padding: 0 11px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.histogram-students li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+}
+
+.histogram-students li > span {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.histogram-students small { color: #647466; }

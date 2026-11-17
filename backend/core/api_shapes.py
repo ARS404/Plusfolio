@@ -242,7 +242,7 @@ SCHEMAS['Analytics']=record('Аналитический отчёт',{
  'discussion':nullable(record('Охват разбором',{'total':number('Пары кружок × задача.'),'discussed':number(),'remaining':number(),'visible':number('Открытые решения.'),'percent':PERCENT}), 'null без групповой аналитики.'),
  'distribution':array(record('Диапазон прогресса',{'label':text(),'count':number()}),'Пустой массив в личном отчёте.'),
  'worksheet_rows':array(ref('WorksheetProgress')),
- 'student_rows':array(record('Результаты школьника',{**PERSON,'assigned':number(),'solved':number(),'remaining':number(),'available':number(),'discussed_unsolved':number(),'percent':PERCENT}),'Пустой массив без группового доступа.'),
+ 'student_rows':array(record('Результаты школьника',{**PERSON,'can_view_profile':boolean('Доступна страница школьника.'),'assigned':number(),'solved':number(),'remaining':number(),'available':number(),'discussed_unsolved':number(),'percent':PERCENT}),'Пустой массив без группового доступа.'),
  'topic_rows':array(record('Результаты темы',{'id':nullable(UUID),'public_id':nullable(text()),'name':text(),'path':text('Полный путь темы.'),'depth':number(),
     'assigned':number(),'solved':number(),'recipients':number(),'problem_count':number(),'percent':PERCENT})),
  'circle_rows':array(record('Результаты кружка',{'id':UUID,'public_id':text(),'name':text(),'city':text(),'archived':boolean(),

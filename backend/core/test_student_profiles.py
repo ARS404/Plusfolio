@@ -108,6 +108,19 @@ class StudentProfileTests(TestCase):
                 self.assertEqual(result.data['student_count'],expected_count)
                 self.assertNotIn('subject_student_id',result.data)
 
+    def test_report_links_only_profiles_available_in_the_adult_scope(self):
+        own_id = self.dual.student.pk
+        report = self.get(self.dual, '/api/analytics').data
+        links = {row['id']: row['can_view_profile'] for row in report['student_rows']}
+        self.assertEqual(links, {own_id: False, self.pupil.student.pk: True, self.peer.student.pk: True})
+        self.assertEqual(self.get(self.dual, self.path(student=self.dual)).status_code, 404)
+
+        Enrollment.objects.create(circle=self.circle, student=self.dual.student)
+        report = self.get(self.dual, '/api/analytics').data
+        own_row = next(row for row in report['student_rows'] if row['id'] == own_id)
+        self.assertTrue(own_row['can_view_profile'])
+        self.assertEqual(self.get(self.dual, self.path(student=self.dual)).status_code, 200)
+
     def test_combined_student_role_does_not_add_personal_circles_to_other_student_reports(self):
         data=self.get(self.dual,self.path()).data
         self.assertEqual({row['id'] for row in data['circles']},{str(self.circle.pk)})

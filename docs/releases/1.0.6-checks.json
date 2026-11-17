@@ -1,0 +1,49 @@
+{
+  "version": "1.0.6",
+  "date": "2026-11-17",
+  "previous_tag": "v1.0.5",
+  "scope": "Local release verification. GitHub Actions and server deployment are separate.",
+  "backend": {
+    "suite": "core",
+    "database": "isolated SQLite",
+    "total": 396,
+    "passed": 392,
+    "skipped": 4,
+    "seconds": 216.25,
+    "skip_reason": "PostgreSQL-only checks"
+  },
+  "frontend": {
+    "passed": 51,
+    "production_build": "passed"
+  },
+  "deployment_helpers": {
+    "passed": 53,
+    "scope": "Local unit tests with mocked Docker",
+    "excluded": [
+      "S3 upload test requires botocore"
+    ]
+  },
+  "database": {
+    "new_migrations": [],
+    "last_core_migration": "0019_issue_edit_version",
+    "schema_drift": "none",
+    "migration_plan_after_initialization": "no operations",
+    "update_command": "python3 scripts/server.py update"
+  },
+  "compatibility": {
+    "models_and_migrations_match_v1_0_5": true,
+    "dependency_graph_matches_v1_0_5": true,
+    "tex_sources_match_v1_0_5": true,
+    "tex_contract": "58cb607156874c974024f064bf96e166974dd422d72371161e51abbfc83399be",
+    "tex_files": 486
+  },
+  "browser_smoke_test": [
+    "Version 1.0.6 shown in local demo",
+    "Circle link preselects its report filter; reset clears it",
+    "Five-point bins show a count only after selecting a column",
+    "Expanded list matches the column count and profile opens with the same circle"
+  ],
+  "limits": [
+    "The local Colima profile is broken, so Linux/Docker/PostgreSQL integration was not run locally."
+  ]
+}

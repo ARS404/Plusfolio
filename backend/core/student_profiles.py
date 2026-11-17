@@ -5,15 +5,20 @@ from . import services as s
 from .models import Assignment,Enrollment,Student
 
 
+def profile_scope(user):
+    students = Student.objects.all()
+    if s.admin(user):
+        return students
+    circles = s.group_circles_for(user)
+    return students.filter(
+        Q(Exists(Enrollment.objects.filter(student_id=OuterRef('pk'), circle__in=circles))) |
+        Q(Exists(Assignment.objects.filter(student_id=OuterRef('pk'), issue__circle__in=circles)))
+    )
+
+
 def subject(user,student_id):
     s.require(s.can_analyse_group(user))
-    students=Student.objects.filter(pk=student_id)
-    if not s.admin(user):
-        circles=s.group_circles_for(user)
-        students=students.filter(
-            Q(Exists(Enrollment.objects.filter(student_id=OuterRef('pk'),circle__in=circles)))|
-            Q(Exists(Assignment.objects.filter(student_id=OuterRef('pk'),issue__circle__in=circles))))
-    student=students.select_related('user').only('id','user_id','graduation_year','user__id','user__name').first()
+    student=profile_scope(user).filter(pk=student_id).select_related('user').only('id','user_id','graduation_year','user__id','user__name').first()
     if student is None:raise s.NotFound('Школьник недоступен.')
     return student
 
