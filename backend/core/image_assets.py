@@ -52,8 +52,9 @@ def readable_assets(user,assets,circle=None):
         problems=(problems|s.my_problems_for(user)).distinct()
         worksheets=(worksheets|s.my_worksheets_for(user)).distinct()
     if circle is not None:
-        problems=problems.filter(items__worksheet__issues__circle=circle)
-        worksheets=worksheets.filter(issues__circle=circle)
+        issues=s.issues_for(user).filter(circle=circle)
+        problems=problems.filter(s.issued_material_filter('problem',issues))
+        worksheets=worksheets.filter(s.issued_material_filter('worksheet',issues))
     statements=Problem.statement_assets.through.objects.filter(imageasset_id=OuterRef('pk'),problem_id__in=problems)
     solutions=Problem.solution_assets.through.objects.filter(imageasset_id=OuterRef('pk'),problem_id__in=s.solutions_for(user,problems,circle))
     texts=WorksheetBlock.assets.through.objects.filter(imageasset_id=OuterRef('pk'),worksheetblock__worksheet__in=worksheets)

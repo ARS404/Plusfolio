@@ -66,7 +66,7 @@ class Command(BaseCommand):
         from core.worksheets import publish
         for sheet in sheets:publish(admin,sheet.document_id,{'version':sheet.revision})
         for circle,sheet in [(circles[0],sheets[0]),(circles[0],sheets[1]),(circles[1],sheets[0]),(circles[2],sheets[2])]:
-            s.issue_worksheet(admin,circle,sheet.pk,timezone.localdate()-timedelta(days=7 if sheet==sheets[0] else 2))
+            s.issue_worksheet(admin,circle,sheet.pk,timezone.localdate()-timedelta(days=7 if sheet==sheets[0] else 2),visible_to_students=True)
         rng=random.Random(12)
         for person in students:
             for i,problem in enumerate(problems[:6]):

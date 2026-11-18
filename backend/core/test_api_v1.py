@@ -257,6 +257,10 @@ class ApiWorkflowTests(TestCase):
         self.assertEqual(issued.status_code,200,issued.data)
         issue=next(item for item in issued.data if item['document_id']==copied.data['document_id'])
         self.assertTrue(json.loads(issued.content)[0]['pdf_url'].startswith('/api/v1/'))
+        self.assertFalse(issue['visible_to_students'])
+        opened=client.post(f"/api/v1/circles/{self.circle.pk}/issues/{issue['id']}/publish",{'version':issue['version']},format='json')
+        self.assertEqual(opened.status_code,200,opened.data)
+        self.assertTrue(opened.data['visible_to_students'])
         journal=client.get(f'/api/v1/circles/{self.circle.pk}/journal',{'issues':issue['id']}).data
         pid=journal['blocks'][0]['problems'][0]['id'];sid=journal['people'][0]['id']
         version=next((state['version'] for state in journal['solves'] if state['problem_id']==pid and state['student_id']==sid),0)

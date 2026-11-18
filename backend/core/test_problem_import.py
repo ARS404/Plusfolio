@@ -80,7 +80,7 @@ class OptionalTitleAndImportTests(TestCase):
             if not title:self.assertEqual(response.data['title'],f'Задача №{problems[-1].number_id}')
         self.assertEqual(len({row.pk for row in problems}),4);self.assertEqual(len({row.number_id for row in problems}),4)
         sheet=s.create_material(self.teacher,'worksheet',{'title':'Листок','topics':[str(self.topic.pk)],'problems':[str(row.pk) for row in problems]})
-        s.issue_worksheet(self.teacher,self.circle,sheet.pk,timezone.localdate())
+        s.issue_worksheet(self.teacher,self.circle,sheet.pk,timezone.localdate(),visible_to_students=True)
         s.mark(self.teacher,self.circle,problems[2].pk,{'student_id':self.student.student.pk,'value':True,'version':0})
         self.assertTrue(Solve.objects.get(student=self.student.student,problem=problems[2]).solved)
         self.assertFalse(Solve.objects.filter(student=self.student.student,problem=problems[3],solved=True).exists())

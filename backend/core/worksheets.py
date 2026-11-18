@@ -1,4 +1,5 @@
 """Personal worksheet documents with immutable, independently published revisions."""
+from collections.abc import Mapping
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import F,Q
@@ -20,10 +21,18 @@ def catalogue(user,scope='available'):
     return rows.filter(own)
 
 
-def get_document(user,pk):
-    revision=catalogue(user).select_related('document','author').filter(document_id=pk).first()
-    if not revision:raise s.NotFound('Листок недоступен.')
-    return revision
+def document_versions(user,document_id):
+    return s.worksheets_for(user).filter(document_id=document_id)
+
+
+def get_document(user,pk,*,revision=None):
+    library = catalogue(user).filter(document_id=pk)
+    versions = library
+    if revision is not None:
+        versions = document_versions(user,pk).filter(revision=revision,document_id__in=library.values('document_id'))
+    worksheet = versions.select_related('document','author').first()
+    if worksheet is None:raise s.NotFound('Листок недоступен.')
+    return worksheet
 
 
 def metadata(revision,user):
@@ -62,7 +71,7 @@ def update(user,pk,data):
     s.require(document.author_id==user.pk,'Редактировать листок может только его автор.')
     base=document.current_revision
     if base.archived:raise ValidationError('Листок в архиве.')
-    if type(data.get('version')) is not int:raise ValidationError('Передайте номер редактируемой версии.')
+    if not isinstance(data,Mapping) or type(data.get('version')) is not int:raise ValidationError('Передайте номер редактируемой версии.')
     if data['version']!=base.revision:raise s.Conflict('Листок уже изменён. Обновите страницу перед сохранением.')
     return s.create_material(user,'worksheet',fields(base,data),_document=document,_base=base)
 
@@ -85,7 +94,7 @@ def publish(user,pk,data):
     document=WorksheetDocument.objects.select_for_update(of=('self',)).select_related('current_revision').get(pk=pk)
     current=document.current_revision
     if current.archived:raise ValidationError('Листок в архиве.')
-    if type(data.get('version')) is not int:raise ValidationError('Передайте номер публикуемой версии.')
+    if not isinstance(data,Mapping) or type(data.get('version')) is not int:raise ValidationError('Передайте номер публикуемой версии.')
     if data['version']!=current.revision:raise s.Conflict('Автор уже изменил листок. Проверьте новую версию перед публикацией.')
     if document.public_revision_id!=current.pk:
         document.public_revision=current;document.save(update_fields=['public_revision'])

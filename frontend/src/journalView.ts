@@ -3,14 +3,12 @@ type JournalProblem={id:string;worksheet_position?:number;[key:string]:any};
 type JournalBlock={issue_id:number;issued_on:string;problems:JournalProblem[];recipient_ids?:number[];[key:string]:any};
 
 export function journalProblemProgress(blocks:JournalBlock[],states:ReadonlyMap<string,{solved:boolean}>,people:{id:number}[]){
- type Cohort={readonly key:string;readonly ids:ReadonlySet<number>};
- const cohort=(ids:ReadonlySet<number>):Cohort=>({key:[...ids].sort((a,b)=>a-b).join(','),ids});
- const visible=new Set(people.map(person=>person.id)),recipients=new Map<string,Cohort>();
+ const visible=new Set(people.map(person=>person.id)),recipients=new Map<string,ReadonlySet<number>>();
  for(const block of blocks){
   if(!block.problems.length)continue;
   const selected=new Set<number>();
   for(const student of block.recipient_ids??[])if(visible.has(student))selected.add(student);
-  const group=cohort(selected),unions=new Map<Cohort,Cohort>();
+  const group:ReadonlySet<number>=selected,unions=new Map<ReadonlySet<number>,ReadonlySet<number>>();
   for(const problem of block.problems){
    const previous=recipients.get(problem.id);
    if(!previous){recipients.set(problem.id,group);continue}
@@ -19,14 +17,14 @@ export function journalProblemProgress(blocks:JournalBlock[],states:ReadonlyMap<
    if(!merged){
     merged=previous;
     // Cohorts are shared by tasks; unions must not mutate an earlier cohort.
-    if(previous.key!==group.key)for(const student of group.ids)if(!previous.ids.has(student)){merged=cohort(new Set([...previous.ids,...group.ids]));break}
+    for(const student of group)if(!previous.has(student)){merged=new Set([...previous,...group]);break}
     unions.set(previous,merged);
    }
    if(merged!==previous)recipients.set(problem.id,merged);
   }
  }
  const result=new Map<string,{solved:number;assigned:number;percent:number|null}>();
- for(const [problem,{ids:assigned}] of recipients){
+ for(const [problem,assigned] of recipients){
   let solved=0;for(const student of assigned)if(states.get(student+':'+problem)?.solved)solved++;
   result.set(problem,{solved,assigned:assigned.size,percent:assigned.size?100*solved/assigned.size:null});
  }

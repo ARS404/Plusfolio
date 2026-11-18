@@ -10,6 +10,7 @@ export default function WorksheetBuilder({value,onChange,initialProblems=[],titl
  const [known,setKnown]=useState<Record<string,BuilderProblem>>(()=>Object.fromEntries(initialProblems.map(problem=>[problem.id,builderProblem(problem)])));
  const [picker,setPicker]=useState<number|null>(null),[query,setQuery]=useState(''),[choices,setChoices]=useState<BuilderProblem[]>([]),[searching,setSearching]=useState(false),[error,setError]=useState('');
  const [tag,setTag]=useState<string[]>([]),[notice,setNotice]=useState('');
+ const pickerOpen=picker!==null;
  const [uploads,setUploads]=useState(0);
  const [expanded,setExpanded]=useState<Record<string,boolean>>({});
  const [preview,setPreview]=useState(''),[previewing,setPreviewing]=useState(false),[solutions,setSolutions]=useState(false),[snapshot,setSnapshot]=useState<symbol|null>(null);
@@ -19,7 +20,7 @@ export default function WorksheetBuilder({value,onChange,initialProblems=[],titl
  useEffect(()=>()=>{abortPreview.current?.abort()},[]);
  useEffect(()=>()=>{if(preview)URL.revokeObjectURL(preview)},[preview]);
  useEffect(()=>{
-  if(picker===null){setChoices(current=>current.length?[]:current);return}const controller=new AbortController();setSearching(true);setError('');setChoices([]);setNotice('');
+  if(!pickerOpen){setChoices(current=>current.length?[]:current);return}const controller=new AbortController();setSearching(true);setError('');setChoices([]);setNotice('');
   const text=query.trim();
   if(text&&text.length<3&&!/^\d+$/.test(text)){setSearching(false);setNotice('Введите хотя бы 3 символа или ID задачи.');return()=>controller.abort()}
   const timer=setTimeout(async()=>{
@@ -31,7 +32,7 @@ export default function WorksheetBuilder({value,onChange,initialProblems=[],titl
    }catch(error:any){if(!controller.signal.aborted)setError(error.message)}finally{if(!controller.signal.aborted)setSearching(false)}
   },500);
   return()=>{clearTimeout(timer);controller.abort()};
- },[query,picker,JSON.stringify(tag)]);
+ },[query,pickerOpen,JSON.stringify(tag)]);
  const canInsert=value.length<300;
  const insert=(index:number,block:WorksheetBlock)=>{if(!canInsert)return;const key=crypto.randomUUID();const next=[...value];next.splice(index,0,{...block,_key:key});setExpanded(old=>({...old,[key]:true}));onChange(next)};
  const isExpanded=(block:WorksheetBlock,index:number)=>expanded[block._key||String(index)]??(index<2);

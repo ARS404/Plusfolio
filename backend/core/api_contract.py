@@ -2,7 +2,7 @@
 import re
 from .search_contract import SEARCH_BODY, SEARCH_PARAMETERS, SEARCH_DESCRIPTION, SEARCH_EXAMPLE, SEARCH_RESPONSE_EXAMPLE
 
-from .catalogue_search_contract import PARAMETERS as CATALOGUE_PARAMETERS, DESCRIPTION as CATALOGUE_DESCRIPTION
+from .catalogue_search_contract import PARAMETERS as CATALOGUE_PARAMETERS, DESCRIPTION as CATALOGUE_DESCRIPTION, CIRCLE_STATE, INVITE_ROLE
 
 STRING = {'type': 'string'}
 UUID = {'type': 'string', 'format': 'uuid'}
@@ -57,7 +57,8 @@ def operation(id, summary, access='all', *, body=None, example=None, parameters=
 
 
 # Django converters and view argument names are part of the same registry as the schema.
-ANALYTICS_PARAMETERS = [query('circle','UUID кружка.',multiple=True,schema=UUID),CITY,TOPIC,query('problem_tag','Числовой ID тега задач.',multiple=True,schema=INT),query('worksheet_tag','Числовой ID тега листков.',multiple=True,schema=INT),query('include_discussed','1 — учитывать разобранные задачи (по умолчанию); 0 — исключать их в контексте выдачи. Общая пара остаётся, если задача ещё не разобрана хотя бы в одном выбранном кружке получателя.',schema={'enum':['0','1'],'default':'1'})]
+CIRCLE_STATE_PARAM = query('state',CIRCLE_STATE['description'],schema=CIRCLE_STATE)
+ANALYTICS_PARAMETERS = [query('circle','UUID кружка.',multiple=True,schema=UUID),CIRCLE_STATE_PARAM,CITY,TOPIC,query('problem_tag','Числовой ID тега задач.',multiple=True,schema=INT),query('worksheet_tag','Числовой ID тега листков.',multiple=True,schema=INT),query('include_discussed','1 — учитывать разобранные задачи (по умолчанию); 0 — исключать их в контексте выдачи. Общая пара остаётся, если задача ещё не разобрана хотя бы в одном выбранном кружке получателя.',schema={'enum':['0','1'],'default':'1'})]
 
 
 ROUTES = [
@@ -88,13 +89,15 @@ ROUTES = [
  ('account/password', 'api.account_password', {'POST': operation('passwordChange', 'Сменить собственный пароль', body=obj({'current_password': STRING, 'new_password': STRING, 'confirm_password': STRING}, ['current_password','new_password','confirm_password']),
     description='Новый пароль от 12 символов. После смены все прежние API-токены становятся недействительными.')}),
  ('circles', 'api.circles', {
-    'GET': operation('circleList', 'Доступные кружки', parameters=[Q,CITY]),
+    'GET': operation('circleList', 'Доступные кружки', parameters=[Q,CITY,CIRCLE_STATE_PARAM,query('invite_role',INVITE_ROLE['description'],schema=INVITE_ROLE)]),
     'POST': operation('circleCreate', 'Создать кружок', 'admin', body=obj({'name': STRING, 'city': STRING, 'region': STRING, 'description': STRING, 'tags': ARRAY_INT}, ['name']),
         example={'name':'Математический кружок','city':'Москва','region':'Москва','description':'7–8 классы','tags':[]}, status=201)}),
  ('circles/<uuid:pk>', 'api.circle_detail', {
     'GET': operation('circleGet', 'Данные доступного кружка и флаги возможностей'),
-    'PATCH': operation('circleUpdate', 'Изменить свой активный кружок', 'writer', body=obj({'name': STRING,'city': STRING,'region': STRING,'description': STRING,'tags': ARRAY_INT}),
-        description='Теги кружка меняет только администратор. can_write зависит от текущего назначения и архива.')}),
+    'PATCH': operation('circleUpdate', 'Изменить кружок или его статус', 'writer', body={'oneOf':[
+        {**obj({'name': STRING,'city': STRING,'region': STRING,'description': STRING,'tags': ARRAY_INT}), 'not': {'required':['archived']}},
+        {**obj({'archived': BOOL},['archived']), 'additionalProperties': False}]},example={'archived':True},
+        description='Статус меняют администратор и назначенный преподаватель отдельным запросом с archived. В архиве действует режим просмотра. Остальные поля изменяются в активном кружке, теги меняет администратор.')}),
  ('circles/<uuid:pk>/members', 'api.members', {
     'GET': operation('memberList', 'Действующие школьники кружка'),
     'POST': operation('memberAdd', 'Зачислить зарегистрированного школьника', 'writer', body=obj({'email': {'type':'string','format':'email'},'student_id': INT}),
@@ -111,11 +114,13 @@ ROUTES = [
     'DELETE': operation('teacherRemove', 'Завершить назначение преподавателя', 'admin', body=obj({'email':STRING}, ['email']), example={'email':'T-3'})}),
  ('circles/<uuid:pk>/issues', 'api.issues', {
     'GET': operation('issueList', 'Выдачи листков кружку', parameters=[Q,TAG,query('mode','hybrid — названия и описания по тексту и смыслу; text — обычный поиск.',schema={'enum':['text','hybrid'],'default':'text'})]),
-    'POST': operation('issueCreate', 'Выдать один или несколько листков', 'writer', body=obj({'worksheet_ids':ARRAY_UUID,'issued_on':{'type':'string','format':'date'}}, ['worksheet_ids','issued_on']),
-        example={'worksheet_ids':['<REVISION_UUID>'],'issued_on':'2026-10-26'}, description='Массив UUID версий, не document_id. Дата не в будущем. Набор сохраняется атомарно. Ответ — обновлённый список выдач.')}),
+    'POST': operation('issueCreate', 'Подготовить скрытую выдачу одного или нескольких листков', 'writer', body=obj({'worksheet_ids':ARRAY_UUID,'issued_on':{'type':'string','format':'date'}}, ['worksheet_ids','issued_on']),
+        example={'worksheet_ids':['<REVISION_UUID>'],'issued_on':'2026-10-26'}, description='Массив UUID версий, не document_id. Дата не в будущем. Набор сохраняется атомарно. Новые выдачи скрыты до POST /circles/{pk}/issues/{issue_id}/publish. Ответ — обновлённый список выдач.')}),
  ('circles/<uuid:pk>/issues/<int:issue_id>/editing','api.issue_edit_options',{'GET':operation('issueEditOptions','Версии листка для обновления выдачи','writer',description='Только преподаватель активного кружка или администратор. Доступные версии того же документа и разница состава задач.')}),
  ('circles/<uuid:pk>/issues/<int:issue_id>', 'api.issue_detail', {'GET': operation('issueGet', 'Получить выданную версию листка'),
     'PATCH':operation('issueUpdate','Изменить дату или версию выданного листка','writer',body=obj({'version':INT,'worksheet_id':UUID,'issued_on':{'type':'string','format':'date'}},['version']),description='Ожидаемая version выдачи из GET. Только доступная версия того же document_id; номер, назначения и общие отметки сохраняются. При конфликте 409.')}),
+ ('circles/<uuid:pk>/issues/<int:issue_id>/publish', 'api.issue_publish', {'POST': operation('issuePublish', 'Показать выданный листок школьникам', 'writer',
+    body=obj({'version':INT}, ['version']),example={'version':1}, description='Назначает листок текущим участникам активного кружка. Ожидаемая version выдачи из GET; при конфликте 409. Повторная публикация назначений не дублирует.')}),
  ('circles/<uuid:pk>/issues/<int:issue_id>/<str:file_kind>', 'api.issue_document', {'GET': operation('issueFile', 'PDF/TeX/ZIP конкретной выдачи', parameters=SOURCE, binary=True)}),
  ('circles/<uuid:pk>/journal', 'api.journal', {'GET': operation('journalGet', 'Журнал, блоки задач и версии отметок', parameters=[ISSUES,Q,*JOURNAL_VIEW])}),
  ('circles/<uuid:pk>/journal/export', 'api.journal_export', {'GET': operation('journalExport', 'Выгрузить текущий срез журнала', parameters=[ISSUES,Q,*JOURNAL_VIEW,query('file_format','Формат файла.',schema={'enum':['xlsx','tsv'],'default':'xlsx'})], binary=True)}),
@@ -130,13 +135,18 @@ ROUTES = [
         description='kind: problem или worksheet. Условия и решения поддерживают текст, TeX, TikZ и images. Для листка нужны title и blocks (текст/задачи); прежний problems принимается для листков только из задач. topics непустой. Робот MUST соблюдать /api/v1/documentation/robot-worksheet-upload?audience=robot.')}),
  ('materials/<str:kind>/<uuid:pk>', 'api.material_detail', {'GET': operation('materialGet', 'Условие и разрешённые решения материала', parameters=[query('circle','UUID кружка для контекстного показа решений.',schema=UUID)])}),
  ('materials/<str:kind>/<uuid:pk>/<str:file_kind>', 'api.material_document', {'GET': operation('materialFile', 'Скачать PDF/TeX/ZIP доступного материала', parameters=SOURCE+[query('circle','UUID контекста кружка.',schema=UUID)], binary=True)}),
+ ('problems/<uuid:pk>/worksheets', 'api.problem_worksheets', {'GET': operation('problemWorksheets', 'Листки, в которых используется задача',
+    description='Листки из доступной части библиотеки. document_id открывает ту же версию, которая проверена на наличие задачи, через GET /worksheet-documents/{pk}.')}),
  ('worksheet-documents/<uuid:pk>', 'api.worksheet_document', {
-    'GET': operation('worksheetGet', 'Открыть логический листок по document_id'),
+    'GET': operation('worksheetGet', 'Открыть логический листок по document_id',
+        parameters=[query('revision','Номер доступной версии листка.',schema={'type':'integer','minimum':1})]),
     'PATCH': operation('worksheetUpdate', 'Сохранить новую личную версию своего листка', body=WORKSHEET_EDIT,
         example={'version':1,'title':'Моя редакция','problems':['<PROBLEM_UUID>']}, description='Только автор. version — текущий revision. Не путать document_id с UUID версии id.')}),
  ('worksheet-documents/<uuid:pk>/publish', 'api.worksheet_publish', {'POST': operation('worksheetPublish', 'Опубликовать текущую версию для всех', 'admin', body=obj({'version':INT},['version']), example={'version':2})}),
+ ('worksheets/<uuid:pk>/circles', 'api.worksheet_circles', {'GET': operation('worksheetCircles', 'Кружки, которым сейчас выдана версия листка',
+    description='pk — UUID версии листка. Возвращаются текущие выдачи в доступных кружках. Скрытые выдачи доступны только в рамках группового доступа.')}),
  ('worksheets/<uuid:pk>/copy', 'api.worksheet_copy', {'POST': operation('worksheetCopy', 'Сохранить себе независимую личную копию', body=obj({}),example={},status=201,
-    description='pk — UUID доступной версии. Копия получает новые document_id, W-ID и UUID версии. Доступно также школьнику и аналитику.')}),
+    description='pk — UUID доступной версии. Копия получает новые document_id, W-ID и UUID версии. Доступно преподавателю, аналитику и администратору.')}),
  ('my-materials/<str:kind>', 'api.my_materials', {'GET': operation('myMaterials', 'Назначенные мне задачи или листки', 'student', parameters=[Q,TAG], description='kind: problem или worksheet. До 300 записей, уточняйте фильтры.')}),
  ('my-problems/<uuid:pk>', 'api.my_problem', {'GET': operation('myProblem', 'Моя задача с разрешённым решением', 'student')}),
  ('my-issues/<int:issue_id>', 'api.my_issue_detail', {'GET': operation('myIssue', 'Выданный мне листок с параметрами выдачи', 'student')}),
@@ -176,7 +186,7 @@ RESPONSE_EXAMPLES = {
  'circleList': [{'id':'<CIRCLE_UUID>','public_id':'C-12','name':'Математический кружок','city':'Москва','can_write':True}],
  'worksheetCopy': {'id':'<NEW_REVISION_UUID>','document_id':'<NEW_DOCUMENT_UUID>','public_id':'W-32','revision':1,'can_edit':True,'is_public':False,'problem_ids':['<PROBLEM_UUID>']},
  'worksheetUpdate': {'id':'<NEW_REVISION_UUID>','document_id':'<SAME_DOCUMENT_UUID>','public_id':'W-32','revision':2,'can_edit':True,'is_public':False},
- 'issueCreate': [{'id':19,'issue_public_id':'ISS-19','public_id':'W-32','worksheet_id':'<REVISION_UUID>','document_id':'<DOCUMENT_UUID>','number':3,'issued_on':'2026-10-26'}],
+ 'issueCreate': [{'id':19,'issue_public_id':'ISS-19','public_id':'W-32','worksheet_id':'<REVISION_UUID>','document_id':'<DOCUMENT_UUID>','number':3,'issued_on':'2026-10-26','visible_to_students':False}],
  'journalMark': {'solved':True,'version':1},
  'invitationCreate': {'id':'<INVITATION_UUID>','ids':['<INVITATION_UUID>']},
  'topicCreate': {'id':'<TOPIC_UUID>','public_id':'TOP-42'},

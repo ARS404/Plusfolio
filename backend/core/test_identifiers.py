@@ -104,7 +104,7 @@ class EntityIdentifierTests(TestCase):
     def test_edit_keeps_sheet_id_and_issued_snapshot_copy_gets_new_id(self):
         client=self.client_for(self.teacher)
         copied=client.post(f'/api/worksheets/{self.sheet.pk}/copy',{},format='json').data
-        issue=s.issue_worksheet(self.teacher,self.circle,copied['id'],timezone.localdate())
+        issue=s.issue_worksheet(self.teacher,self.circle,copied['id'],timezone.localdate(),visible_to_students=True)
         changed=client.patch('/api/worksheet-documents/'+copied['document_id'],{'version':1,'title':'Новая версия'},format='json')
         self.assertEqual(changed.status_code,200,changed.data)
         self.assertEqual(changed.data['public_id'],copied['public_id'])

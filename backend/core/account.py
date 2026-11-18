@@ -7,7 +7,7 @@ from django.db.models import Count, Q
 from django.utils import timezone
 from . import services as s
 from .models import (AnalystGrant, CircleTeacher, Enrollment, Invitation, Problem,
-                     User, Worksheet, WorksheetIssue, WorksheetItem, Solve, Assignment)
+                     User, Worksheet, WorksheetIssue, WorksheetItem, Solve)
 
 
 def published_counts(model, user):
@@ -46,7 +46,7 @@ def overview(user):
                                   'archived': circle.archived, 'relations': relations})
     if 'student' in user.roles:
         # Personal assignments stay personal even when this account also teaches or analyses.
-        problems = WorksheetItem.objects.filter(worksheet_id__in=Assignment.objects.filter(student__user=user).values('issue__worksheet_id'),include_in_journal=True).values('problem_id').distinct()
+        problems = WorksheetItem.objects.filter(worksheet_id__in=s.student_assignments(user).values('issue__worksheet_id'),include_in_journal=True).values('problem_id').distinct()
         assigned = problems.count()
         solved = Solve.objects.filter(student__user=user,solved=True,problem_id__in=problems).count()
         result['student'] = {'assigned': assigned, 'solved': solved, 'remaining': assigned-solved,

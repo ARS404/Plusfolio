@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from datetime import date
 from django.conf import settings
 from django.contrib.auth import authenticate,login,logout
@@ -98,9 +99,10 @@ def auth_logout(request):logout(request);return Response({'ok':True})
 def circle_data(circle,user):
     batched=hasattr(circle,'_current_teachers')
     analyse=(s.admin(user) or circle._teaches or circle._analyses) if batched else s.can_analyse_group(user,circle)
-    write=(not circle.archived and (s.admin(user) or circle._teaches)) if batched else s.can_write(user,circle)
+    can_manage_state=(s.admin(user) or circle._teaches) if batched else s.can_manage_circle_state(user,circle)
+    write=not circle.archived and can_manage_state
     teachers=circle._current_teachers if batched else circle.teaching.filter(ended_at=None).select_related('teacher__user')
-    return {'id':str(circle.pk),'public_id':public_id('circle',circle.number_id),'name':circle.name,'description':circle.description,'city':circle.city,'region':circle.region,'archived':circle.archived,'tags':[{'id':tag.pk,'public_id':public_id('tag',tag.pk),'name':tag.name} for tag in circle.tags.all()],'teachers':[{'id':t.teacher.user_id,'public_id':public_id('teacher',t.teacher_id),'user_public_id':public_id('user',t.teacher.user_id),'name':t.teacher.user.name,'email':t.teacher.user.email if analyse else None} for t in teachers],'student_count':circle._student_count if batched else circle.enrollments.filter(left_at=None).count(),'worksheet_count':circle._worksheet_count if batched else circle.issues.count(),'can_write':write,'can_analyse_group':analyse,'can_manage_teachers':s.admin(user)}
+    return {'id':str(circle.pk),'public_id':public_id('circle',circle.number_id),'name':circle.name,'description':circle.description,'city':circle.city,'region':circle.region,'archived':circle.archived,'tags':[{'id':tag.pk,'public_id':public_id('tag',tag.pk),'name':tag.name} for tag in circle.tags.all()],'teachers':[{'id':t.teacher.user_id,'public_id':public_id('teacher',t.teacher_id),'user_public_id':public_id('user',t.teacher.user_id),'name':t.teacher.user.name,'email':t.teacher.user.email if analyse else None} for t in teachers],'student_count':circle._student_count if batched else circle.enrollments.filter(left_at=None).count(),'worksheet_count':circle._worksheet_count if batched else s.issues_for(user).filter(circle=circle).count(),'can_write':write,'can_analyse_group':analyse,'can_manage_teachers':s.admin(user) and not circle.archived,'can_manage_state':can_manage_state}
 
 @api_view(['GET','POST'])
 def circles(request):
@@ -114,13 +116,29 @@ def circles(request):
             circle=Circle.objects.create(name=name,description=d.get('description',''),city=d.get('city',''),region=d.get('region',''),created_by=request.user)
             circle.tags.set(tags);s.audit(request.user,'circle.create',{'circle':str(circle.pk)},circle)
         return Response(circle_data(circle,request.user),status=201)
-    return Response([circle_data(c,request.user) for c in read.circle_rows(search_entities(f.by_city(s.circles_for(request.user),f.query_values(request.query_params,'city')),request.query_params.get('q',''),'circle',text_fields=('name','city','region')),request.user)])
+    selected = f.by_circle_state(s.circles_for(request.user), request.query_params.get('state','all'))
+    if request.query_params.get('invite_role'):
+        selected=selected.filter(pk__in=s.invitation_circles_for(request.user,request.query_params['invite_role']))
+    selected = f.by_city(selected, f.query_values(request.query_params,'city'))
+    selected = search_entities(selected, request.query_params.get('q',''),'circle',text_fields=('name','city','region'))
+    return Response([circle_data(c,request.user) for c in read.circle_rows(selected,request.user)])
 
 @api_view(['GET','PATCH'])
 def circle_detail(request,pk):
-    circle=s.get_circle(request.user,pk,write=True) if request.method=='PATCH' else read.circle_rows(s.circles_for(request.user).filter(pk=pk),request.user).first()
-    if circle is None:raise s.NotFound('Кружок недоступен.')
-    if request.method=='PATCH':
+    if request.method=='GET':
+        circle = read.circle_rows(s.circles_for(request.user).filter(pk=pk),request.user).first()
+        if circle is None:raise s.NotFound('Кружок недоступен.')
+        return Response(circle_data(circle,request.user))
+
+    if not isinstance(request.data,Mapping):raise DjangoValidationError('Передайте JSON-объект.')
+    if 'archived' in request.data:
+        if set(request.data) != {'archived'}:
+            raise DjangoValidationError('Измените статус кружка отдельным запросом.')
+        circle = s.set_circle_archived(request.user,pk,request.data['archived'])
+        return Response(circle_data(circle,request.user))
+
+    with transaction.atomic():
+        circle = s.get_circle(request.user,pk,write=True,lock=True)
         for field in ['name','description','city','region']:
             if field in request.data:setattr(circle,field,str(request.data[field]))
         if not circle.name.strip():raise DjangoValidationError('Укажите название.')
@@ -138,8 +156,8 @@ def members(request,pk):
         if request.data.get('student_id') is not None and request.data.get('email'):raise DjangoValidationError('Выберите школьника или укажите email.')
         s.enroll(request.user,circle,str(request.data.get('email','')),request.data.get('student_id'))
     if request.method=='DELETE':s.unenroll(request.user,circle,str(request.data.get('email','')))
-    can_write=s.can_write(request.user,circle)
-    return Response([{'id':m.student_id,'public_id':public_id('student',m.student_id),'user_public_id':public_id('user',m.student.user_id),'name':m.student.user.name,**m.student.education_info(),**({'email':m.student.user.email} if can_write else {})} for m in circle.enrollments.filter(left_at=None).select_related('student__user').order_by('student__user__name')])
+    can_see_email=s.can_manage_circle_state(request.user,circle)
+    return Response([{'id':m.student_id,'public_id':public_id('student',m.student_id),'user_public_id':public_id('user',m.student.user_id),'name':m.student.user.name,**m.student.education_info(),**({'email':m.student.user.email} if can_see_email else {})} for m in circle.enrollments.filter(left_at=None).select_related('student__user').order_by('student__user__name')])
 
 @api_view(['GET'])
 def student_search(request,pk):
@@ -180,10 +198,9 @@ def issues(request,pk):
     circle=s.get_circle(request.user,pk)
     if request.method=='POST':
         ids=s.selection_ids(request.data,'worksheet_ids','worksheet_id')
-        with transaction.atomic():
-            for worksheet_id in ids:s.issue_worksheet(request.user,circle,worksheet_id,date.fromisoformat(request.data.get('issued_on','')))
+        s.issue_worksheets(request.user,circle,ids,date.fromisoformat(request.data.get('issued_on','')))
     from .catalogue_search import search_issued
-    selected=f.by_tags(circle.issues.all(),f.query_values(request.query_params,'tag'),'worksheet','worksheet__tags')
+    selected=f.by_tags(s.issues_for(request.user).filter(circle=circle),f.query_values(request.query_params,'tag'),'worksheet','worksheet__tags')
     selected=search_issued(selected,request.query_params.get('q',''),request.query_params.get('mode')=='hybrid')
     return Response([issue_data(i) for i in read.issue_rows(selected).order_by('-issued_on','-pk')])
 
@@ -228,7 +245,7 @@ def issue_data(issue,personal=False):
     return {'id':issue.pk,'public_id':public_id('worksheet',issue.worksheet.document.number_id),'issue_public_id':public_id('issue',issue.pk),'worksheet_id':str(issue.worksheet_id),'document_id':str(issue.worksheet.document_id),'revision':issue.worksheet.revision,'title':issue.worksheet.title,'description':issue.worksheet.description,
         'tags':[{'id':tag.pk,'public_id':public_id('tag',tag.pk),'name':tag.name} for tag in issue.worksheet.tags.all()],
         'circle_id':str(issue.circle_id),'circle_public_id':public_id('circle',issue.circle.number_id),'circle_name':issue.circle.name,'city':issue.circle.city,
-        'number':issue.number,'version':issue.version,'issued_on':issue.issued_on.isoformat(),'problem_count':issue._problem_count if hasattr(issue,'_problem_count') else issue.worksheet.items.count(),
+        'number':issue.number,'version':issue.version,'visible_to_students':issue.visible_to_students,'issued_on':issue.issued_on.isoformat(),'problem_count':issue._problem_count if hasattr(issue,'_problem_count') else issue.worksheet.items.count(),
         **issue_references(issue,personal)}
 
 @api_view(['GET'])
@@ -237,7 +254,7 @@ def my_materials(request,kind):
     if kind not in ['problem','worksheet']:raise DjangoValidationError('Неизвестный вид материала.')
     tags=f.query_values(request.query_params,'tag');text=request.query_params.get('q','').strip()
     if kind=='worksheet':
-        qs=WorksheetIssue.objects.filter(assignments__student__user=request.user).distinct()
+        qs=personal_issues(request.user)
         qs=f.by_tags(qs,tags,'worksheet','worksheet__tags')
         if text:
             from .catalogue_search import search_issued
@@ -256,9 +273,13 @@ def my_problem(request,pk):
     if not problem:raise s.NotFound('Задача не назначалась вам.')
     return Response(material_data(problem,request.user,True))
 
+def personal_issues(user):
+    return WorksheetIssue.objects.filter(pk__in=s.student_assignments(user).values('issue_id'))
+
+
 def personal_issue(user,pk):
     s.require('student' in user.roles)
-    issue=WorksheetIssue.objects.filter(pk=pk,assignments__student__user=user).select_related('circle','worksheet').first()
+    issue=personal_issues(user).filter(pk=pk).select_related('circle','worksheet').first()
     if not issue:raise s.NotFound('Листок не назначался вам.')
     return issue
 
@@ -268,9 +289,16 @@ def issue_detail(request,pk,issue_id):
     if request.method=='PATCH':
         from .issue_updates import update
         issue=update(request.user,circle,issue_id,request.data)
-    else:issue=circle.issues.select_related('worksheet__document','worksheet__author','circle').prefetch_related('worksheet__tags').get(pk=issue_id)
+    else:issue=s.issues_for(request.user).filter(circle=circle).select_related('worksheet__document','worksheet__author','circle').prefetch_related('worksheet__tags').get(pk=issue_id)
     payload=material_data(issue.worksheet,request.user,True,circle);issue._problem_count=payload['problem_count']
     return Response({**payload,**issue_data(issue)})
+
+
+@api_view(['POST'])
+def issue_publish(request,pk,issue_id):
+    from .issue_updates import publish
+    issue=publish(request.user,s.get_circle(request.user,pk),issue_id,request.data)
+    return Response(issue_data(issue))
 
 
 @api_view(['GET'])
@@ -299,19 +327,21 @@ def document_response(request,material,kind,issue=None,personal=False,circle=Non
 @api_view(['GET'])
 def material_document(request,kind,pk,file_kind):
     if kind not in ['problem','worksheet']:raise DjangoValidationError('Неизвестный вид материала.')
-    qs=s.problems_for(request.user) if kind=='problem' else s.worksheets_for(request.user)
-    if 'student' in request.user.roles:
-        own=s.my_problems_for(request.user) if kind=='problem' else s.my_worksheets_for(request.user)
-        qs=(qs|own).distinct()
     circle=s.get_circle(request.user,request.query_params['circle']) if request.query_params.get('circle') else None
-    if circle:qs=qs.filter(items__worksheet__issues__circle=circle) if kind=='problem' else qs.filter(issues__circle=circle)
+    if circle:
+        qs=s.circle_materials(request.user,kind,circle)
+    else:
+        qs=s.problems_for(request.user) if kind=='problem' else s.worksheets_for(request.user)
+        if kind=='problem' and 'student' in request.user.roles:
+            qs=qs|s.my_problems_for(request.user)
     material=qs.filter(pk=pk).first()
     if not material:raise s.NotFound('Материал недоступен.')
     return document_response(request,material,file_kind,circle=circle)
 
 @api_view(['GET'])
 def issue_document(request,pk,issue_id,file_kind):
-    circle=s.get_circle(request.user,pk);issue=circle.issues.select_related('worksheet','circle').get(pk=issue_id)
+    circle=s.get_circle(request.user,pk)
+    issue=s.issues_for(request.user).filter(circle=circle).select_related('worksheet','circle').get(pk=issue_id)
     return document_response(request,issue.worksheet,file_kind,issue)
 
 @api_view(['GET'])
@@ -345,19 +375,46 @@ def materials(request,kind):
 
 @api_view(['GET'])
 def material_detail(request,kind,pk):
-    qs=s.problems_for(request.user) if kind=='problem' else s.worksheets_for(request.user)
+    if kind not in ['problem','worksheet']:raise DjangoValidationError('Неизвестный вид материала.')
     circle=s.get_circle(request.user,request.query_params['circle']) if request.query_params.get('circle') else None
-    if circle is not None:
-        qs=qs.filter(items__worksheet__issues__circle=circle) if kind=='problem' else qs.filter(issues__circle=circle)
+    if circle:
+        qs=s.circle_materials(request.user,kind,circle)
+    else:
+        qs=s.problems_for(request.user) if kind=='problem' else s.worksheets_for(request.user)
     material=qs.filter(pk=pk).first()
     if not material:raise s.NotFound('Материал недоступен.')
     return Response(material_data(material,request.user,True,circle))
 
+@api_view(['GET'])
+def problem_worksheets(request,pk):
+    from .worksheets import catalogue
+    rows=catalogue(request.user).filter(items__problem_id=pk).order_by('title','document__number_id').values_list('document_id','document__number_id','title')
+    return Response([{'document_id':str(document_id),'public_id':public_id('worksheet',number),'title':title}
+                     for document_id,number,title in rows])
+
+
+@api_view(['GET'])
+def worksheet_circles(request,pk):
+    issues = s.issues_for(request.user).filter(worksheet_id=pk).order_by('circle__name','circle_id')
+    rows = issues.values_list('circle_id','circle__number_id','circle__name','circle__archived','visible_to_students')
+    return Response([{'id':str(circle_id),'public_id':public_id('circle',number),'name':name,
+                      'archived':archived,'visible_to_students':visible}
+                     for circle_id,number,name,archived,visible in rows])
+
+
 @api_view(['GET','PATCH'])
 def worksheet_document(request,pk):
     from . import worksheets
-    revision=worksheets.update(request.user,pk,request.data) if request.method=='PATCH' else worksheets.get_document(request.user,pk)
-    return Response(material_data(revision,request.user,True))
+    if request.method=='PATCH':
+        revision = worksheets.update(request.user,pk,request.data)
+        return Response(material_data(revision,request.user,True))
+    selected = request.query_params.get('revision')
+    number = int(selected) if selected is not None else None
+    if number is not None and number<1:raise DjangoValidationError('Укажите положительный номер версии.')
+    revision = worksheets.get_document(request.user,pk,revision=number)
+    result = material_data(revision,request.user,True)
+    result['available_revisions'] = list(worksheets.document_versions(request.user,pk).order_by('-revision').values_list('revision',flat=True))
+    return Response(result)
 
 @api_view(['POST'])
 def worksheet_copy(request,pk):
@@ -374,7 +431,7 @@ def journal(request,pk,issue_id=None):
     from .journal import select_issues, snapshot, apply_view, view_options
     circle=s.get_circle(request.user,pk)
     options=view_options(request.query_params)
-    selected=select_issues(circle,str(issue_id) if issue_id is not None else request.query_params.get('issues','all'))
+    selected=select_issues(s.issues_for(request.user).filter(circle=circle),str(issue_id) if issue_id is not None else request.query_params.get('issues','all'))
     problem_ids={item.problem_id for issue in selected for item in issue.worksheet.items.all() if item.include_in_journal}
     visible=s.visible_solution_ids(request.user,problem_ids,circle)
     result=snapshot(request.user,circle,selected,lambda problem,user:material_data(problem,user,circle=circle,allowed_solutions=visible),request.query_params.get('q',''))
@@ -387,13 +444,9 @@ def journal(request,pk,issue_id=None):
 
 @api_view(['GET'])
 def journal_export(request,pk):
-    from .journal import select_issues, snapshot, apply_view, view_options
     from .journal_export import export
     circle=s.get_circle(request.user,pk)
-    options=view_options(request.query_params)
-    selected=select_issues(circle,request.query_params.get('issues','all'),for_export=True)
-    data=snapshot(request.user,circle,selected,lambda problem,user:{'id':str(problem.pk),'title':problem.display_title},request.query_params.get('q',''))
-    return export(apply_view(data,**options),request.query_params.get('file_format','xlsx'))
+    return export(request.user,circle,request.query_params)
 
 @api_view(['POST'])
 def mark(request,pk,problem_id,kind):
@@ -431,17 +484,15 @@ def analytics(request):
 @api_view(['GET','POST'])
 def invitations(request):
     if request.method=='POST':
-        d=request.data;role=d.get('role')
+        d=request.data
+        if not isinstance(d,Mapping):raise DjangoValidationError('Передайте JSON-объект.')
+        role=d.get('role');email=str(d.get('email',''));tag_ids=d.get('tags')
         if role in ['student','teacher']:
             ids=s.selection_ids(d,'circle_ids','circle_id')
-            found={str(circle.pk):circle for circle in s.circles_for(request.user).filter(pk__in=ids)}
-            if len(found)!=len(ids):raise s.NotFound('Кружок недоступен.')
-            selected=[found[pk] for pk in ids]
+            objects=s.invite_many(request.user,email,role,ids,tag_ids)
         else:
             if d.get('circle_ids') or d.get('circle_id'):raise DjangoValidationError('Для этой роли область определяется без выбора кружков.')
-            selected=[None]
-        with transaction.atomic():
-            objects=[s.invite(request.user,str(d.get('email','')),role,circle,d.get('tags')) for circle in selected]
+            objects=[s.invite(request.user,email,role,tag_ids=tag_ids)]
         return Response({'id':str(objects[0].pk),'ids':[str(obj.pk) for obj in objects]},status=201)
     qs=Invitation.objects.all() if s.admin(request.user) else Invitation.objects.filter(created_by=request.user)
     from django.db.models import Prefetch
@@ -452,7 +503,8 @@ def invitations(request):
 def invitation_detail(request,pk):
     invitation=Invitation.objects.get(pk=pk)
     s.require(s.admin(request.user) or invitation.created_by_id==request.user.pk)
-    invitation.state='revoked';invitation.save();return Response({'ok':True})
+    Invitation.objects.filter(pk=invitation.pk,state='pending').update(state='revoked')
+    return Response({'ok':True})
 
 @csrf_protect
 @require_http_methods(['GET','POST'])
@@ -486,21 +538,28 @@ def users(request):
     from .people import filter_users, role_query
     s.require(s.admin(request.user))
     if request.method=='PATCH':
-        account=User.objects.get(pk=request.data.get('id'));roles=request.data.get('roles',[])
-        if not roles or not set(roles)<=ROLES:raise DjangoValidationError('Выберите допустимые роли.')
-        if 'admin' in account.roles and 'admin' not in roles:
-            active_admins = User.objects.filter(is_active=True).filter(role_query(['admin'])).count()
-            if active_admins <= 1:
-                raise DjangoValidationError('Нельзя убрать последнего администратора.')
+        if not isinstance(request.data,Mapping):raise DjangoValidationError('Передайте JSON-объект.')
+        roles=request.data.get('roles',[])
+        if not isinstance(roles,list) or not roles or any(not isinstance(role,str) or role not in ROLES for role in roles):raise DjangoValidationError('Выберите допустимые роли.')
         with transaction.atomic():
-            account.roles=roles;account.save();s.profiles(account)
+            from django.db.models import Q
+            account_id=User._meta.pk.to_python(request.data.get('id'))
+            # Serialize role changes without blocking circle writes' foreign-key checks.
+            locked=list(User.objects.select_for_update(no_key=True).filter(Q(pk=account_id)|(Q(is_active=True)&role_query(['admin']))).order_by('pk'))
+            active_admins=[row for row in locked if row.is_active and s.admin(row)]
+            s.require(any(row.pk==request.user.pk for row in active_admins))
+            account=next((row for row in locked if row.pk==account_id),None)
+            if account is None:raise User.DoesNotExist
+            if account.is_active and s.admin(account) and 'admin' not in roles and len(active_admins)<=1:
+                raise DjangoValidationError('Нельзя убрать последнего администратора.')
+            account.roles=roles;account.save(update_fields=['roles']);s.profiles(account)
             from .people import has_adult_role
             if not has_adult_role(account):account.api_tokens.filter(revoked_at=None).update(revoked_at=timezone.now())
-            grantids=request.data.get('tags',[]);grants=Tag.objects.filter(pk__in=grantids,kind='circle',archived=False)
-            if grants.count()!=len(set(grantids)):raise DjangoValidationError('Недопустимая область аналитика.')
+            grantids=request.data.get('tags',[]);grants=list(Tag.objects.filter(pk__in=grantids,kind='circle',archived=False))
+            if len(grants)!=len(set(grantids)):raise DjangoValidationError('Недопустимая область аналитика.')
             AnalystGrant.objects.filter(user=account).delete()
             if 'analyst' in roles:
-                for tag in grants:AnalystGrant.objects.create(user=account,tag=tag)
+                AnalystGrant.objects.bulk_create([AnalystGrant(user=account,tag=tag) for tag in grants])
             if 'teacher' not in roles:CircleTeacher.objects.filter(teacher__user=account,ended_at=None).update(ended_at=timezone.now())
             if 'student' not in roles:Enrollment.objects.filter(student__user=account,left_at=None).update(left_at=timezone.now())
             s.audit(request.user,'user.roles',{'user':account.pk,'roles':roles})

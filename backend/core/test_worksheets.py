@@ -1,10 +1,11 @@
+import json
 from datetime import timedelta
 from django.core.management import call_command
 from django.test import TestCase,override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 from . import services as s
-from .models import User, Circle, Worksheet, WorksheetDocument, Assignment, Topic, Tag, Discussion, Enrollment
+from .models import User, Circle, Worksheet, WorksheetDocument, Assignment, Topic, Tag
 from .worksheets import publish
 
 
@@ -45,6 +46,30 @@ class WorksheetWorkspaceTests(TestCase):
         reviewed=self.client_for(self.admin).get('/api/worksheet-documents/'+data['document_id'])
         self.assertEqual(reviewed.status_code,200);self.assertTrue(reviewed.data['can_publish']);self.assertFalse(reviewed.data['can_edit'])
 
+    def test_problem_worksheets_uses_library_links_and_excludes_issued_only_versions(self):
+        sheet=self.copy(self.mentor)
+        problem_id=sheet['problem_ids'][0]
+        path=f'/api/problems/{problem_id}/worksheets'
+        s.issue_worksheet(self.admin,self.circle,sheet['id'],timezone.localdate(),visible_to_students=True)
+
+        owner=self.client_for(self.mentor)
+        found=owner.get(path)
+        self.assertEqual(found.status_code,200,found.data)
+        self.assertIn({'document_id':sheet['document_id'],'public_id':sheet['public_id'],'title':sheet['title']},found.data)
+        for row in found.data:
+            linked=owner.get('/api/worksheet-documents/'+row['document_id'])
+            self.assertEqual(linked.status_code,200)
+            self.assertIn(problem_id,linked.data['problem_ids'])
+
+        teacher=self.client_for(self.teacher)
+        self.assertEqual(teacher.get('/api/materials/worksheet/'+sheet['id']).status_code,200)
+        self.assertNotIn(sheet['document_id'],{row['document_id'] for row in teacher.get(path).data})
+        self.assertEqual(self.client_for(self.student).get(path).data,[])
+
+        changed=self.update(self.mentor,sheet,problems=sheet['problem_ids'][1:])
+        self.assertEqual(changed.status_code,200,changed.data)
+        self.assertNotIn(sheet['document_id'],{row['document_id'] for row in owner.get(path).data})
+
     def test_only_author_edits_and_only_admin_publishes(self):
         data=self.copy()
         for user in [self.teacher,self.admin,self.analyst,self.student]:
@@ -64,7 +89,7 @@ class WorksheetWorkspaceTests(TestCase):
 
     def test_issued_revision_assignments_and_tex_stay_unchanged_after_edit(self):
         data=self.copy(self.teacher)
-        issued=s.issue_worksheet(self.teacher,self.circle,data['id'],timezone.localdate()-timedelta(days=1))
+        issued=s.issue_worksheet(self.teacher,self.circle,data['id'],timezone.localdate()-timedelta(days=1),visible_to_students=True)
         assigned=list(Assignment.objects.filter(issue=issued).values_list('pk','student_id','assigned_at'))
         old_ids=data['problem_ids'];replacement=list(reversed(old_ids[:-1]))
         changed=self.update(self.teacher,data,title='Исправленный листок',description='Новая редакция',problems=replacement)
@@ -76,7 +101,7 @@ class WorksheetWorkspaceTests(TestCase):
         source=self.client_for(self.teacher).get(f'/api/circles/{self.circle.pk}/issues/{issued.pk}/tex')
         self.assertEqual(source.status_code,200);self.assertIn(data['title'],source.content.decode());self.assertNotIn('Исправленный листок',source.content.decode())
         other=Circle.objects.get(name='Олимпиадный старт')
-        new_issue=s.issue_worksheet(self.teacher,other,changed.data['id'],timezone.localdate())
+        new_issue=s.issue_worksheet(self.teacher,other,changed.data['id'],timezone.localdate(),visible_to_students=True)
         self.assertEqual(new_issue.worksheet.title,'Исправленный листок')
         duplicate=self.client_for(self.teacher).post(f'/api/circles/{self.circle.pk}/issues',{'worksheet_id':changed.data['id'],'issued_on':timezone.localdate().isoformat()},format='json')
         self.assertEqual(duplicate.status_code,400)
@@ -100,6 +125,21 @@ class WorksheetWorkspaceTests(TestCase):
         response=self.client_for(self.admin).post('/api/worksheet-documents/'+data['document_id']+'/publish',{'version':1},format='json')
         self.assertEqual(response.status_code,409);self.assertEqual(Worksheet.objects.count(),before)
         self.assertIsNone(WorksheetDocument.objects.get(pk=data['document_id']).public_revision_id)
+
+    def test_invalid_json_roots_cannot_edit_or_publish_a_worksheet(self):
+        data=self.copy()
+        path='/api/worksheet-documents/'+data['document_id']
+        before=Worksheet.objects.count()
+        for body in ([],['version'],'version',None,True,1):
+            with self.subTest(body=body):
+                edited=self.client_for(self.mentor).patch(path,json.dumps(body),content_type='application/json')
+                self.assertEqual(edited.status_code,400)
+                published=self.client_for(self.admin).post(path+'/publish',json.dumps(body),content_type='application/json')
+                self.assertEqual(published.status_code,400)
+        self.assertEqual(Worksheet.objects.count(),before)
+        document=WorksheetDocument.objects.get(pk=data['document_id'])
+        self.assertEqual(str(document.current_revision_id),data['id'])
+        self.assertIsNone(document.public_revision_id)
 
     def test_analyst_can_edit_personal_copies_but_cannot_publish_them(self):
         data=self.copy(self.analyst)

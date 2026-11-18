@@ -1,14 +1,15 @@
 """Batch loading for read serializers; permission decisions never persist across requests."""
 from django.db.models import Count,Exists,OuterRef,Prefetch,Value,BooleanField,Subquery,BigIntegerField
 from django.db.models.functions import Coalesce
-from .models import AnalystGrant,Circle,CircleTeacher,Enrollment,WorksheetIssue,WorksheetItem
+from .models import AnalystGrant,Circle,CircleTeacher,Enrollment,WorksheetItem
+from . import services as s
 
 
 def circle_rows(queryset,user):
     teaches=Exists(CircleTeacher.objects.filter(circle_id=OuterRef('pk'),teacher__user=user,ended_at=None)) if 'teacher' in user.roles else Value(False,output_field=BooleanField())
     analyses=Exists(Circle.tags.through.objects.filter(circle_id=OuterRef('pk'),tag_id__in=AnalystGrant.objects.filter(user=user).values('tag_id'))) if 'analyst' in user.roles else Value(False,output_field=BooleanField())
     students=Enrollment.objects.filter(circle_id=OuterRef('pk'),left_at=None).order_by().values('circle_id').annotate(total=Count('pk')).values('total')
-    issues=WorksheetIssue.objects.filter(circle_id=OuterRef('pk')).order_by().values('circle_id').annotate(total=Count('pk')).values('total')
+    issues=s.issues_for(user).filter(circle_id=OuterRef('pk')).order_by().values('circle_id').annotate(total=Count('pk')).values('total')
     return queryset.annotate(
         _teaches=teaches,_analyses=analyses,
         _student_count=Coalesce(Subquery(students),Value(0),output_field=BigIntegerField()),

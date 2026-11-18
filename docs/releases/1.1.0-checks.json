@@ -1,0 +1,65 @@
+{
+  "version": "1.1.0",
+  "date": "2026-11-19",
+  "previous_tag": "v1.0.6",
+  "scope": "Local release checks on synthetic data.",
+  "backend": {
+    "suite": "core",
+    "database": "isolated SQLite",
+    "total": 412,
+    "passed": 408,
+    "skipped": 4,
+    "seconds": 221.43,
+    "skip_reason": "PostgreSQL-only checks"
+  },
+  "frontend": {
+    "passed": 51,
+    "production_build": "passed"
+  },
+  "documentation": {
+    "audiences": [
+      "human",
+      "robot"
+    ],
+    "roles": [
+      "student",
+      "teacher",
+      "analyst",
+      "admin"
+    ],
+    "markdown_export": "verified",
+    "read_only_operation_filtering": "verified",
+    "last_targeted_tests": 17
+  },
+  "deployment_helpers": {
+    "passed": 49,
+    "scope": "Local unit tests with mocked Docker, update backup and restore guards"
+  },
+  "database": {
+    "new_migrations": [
+      "0020_issue_visibility"
+    ],
+    "last_core_migration": "0020_issue_visibility",
+    "schema_drift": "none",
+    "fresh_initialization": "passed",
+    "migration_plan_after_initialization": "no operations",
+    "upgrade_regression": "0018 -> 0019 -> 0020 with preserved entities, fields, asset relations and issue version 7",
+    "existing_issues_visible": true,
+    "new_issue_default_visible": false,
+    "repeat_migrate_preserves_visibility_and_version": true,
+    "update_command": "python3 scripts/server.py update",
+    "rollback": "Restore a pre-upgrade backup with the matching application version into a fresh instance"
+  },
+  "compatibility": {
+    "tex_toolchain_inputs_changed_from_v1_0_6": [],
+    "dependencies_changed": false
+  },
+  "local_demo": {
+    "healthz_version": "1.1.0",
+    "status": "released"
+  },
+  "limits": [
+    "Docker daemon is unavailable and local Colima profiles report Broken. Native PostgreSQL and Linux/container update/restore integration were not run.",
+    "Migration data preservation was executed on SQLite. Production restore workflow was checked through code and deployment-helper tests."
+  ]
+}

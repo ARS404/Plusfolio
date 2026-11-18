@@ -1,4 +1,4 @@
-import base64,hashlib,io,json,os,sys,time
+import base64,io,os,sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -13,7 +13,7 @@ from . import services as s
 from .content import normalize_blocks,serialize_blocks
 from .documents import project_for,render_pdf,response
 from .image_assets import normalize_image
-from .models import User,ImageAsset,WorksheetBlock,WorksheetItem,Assignment
+from .models import User,ImageAsset,Assignment
 from .tex_cache import ArtifactCache
 from .tex_project import project_files
 from .worksheets import update,copy
@@ -72,7 +72,7 @@ class WorksheetBlockTests(TestCase):
         self.assertNotEqual(sheet.document_id,cloned.document_id)
 
     def test_text_only_sheet_can_be_issued_without_solve_columns(self):
-        sheet=self.sheet([self.text()]);s.issue_worksheet(self.teacher,self.circle,sheet.pk,timezone.localdate())
+        sheet=self.sheet([self.text()]);s.issue_worksheet(self.teacher,self.circle,sheet.pk,timezone.localdate(),visible_to_students=True)
         self.assertEqual(sheet.items.count(),0)
         issue=sheet.issues.get();self.assertGreater(Assignment.objects.filter(issue=issue).count(),0)
         response=self.client_for(self.student).get(f'/api/circles/{self.circle.pk}/journal?issues={issue.pk}')
@@ -92,7 +92,7 @@ class WorksheetBlockTests(TestCase):
         self.assertEqual(self.client_for(self.student).get('/api/images/'+asset).status_code,404)
         self.assertEqual(self.client_for(self.student).post('/api/images',{'data':base64.b64encode(png()).decode()},format='json').status_code,403)
         self.assertEqual(self.client_for(self.mentor).get('/api/images/'+asset).status_code,404)
-        sheet=self.sheet([self.text(images=[{'id':asset}])]);s.issue_worksheet(self.teacher,self.circle,sheet.pk,timezone.localdate())
+        sheet=self.sheet([self.text(images=[{'id':asset}])]);s.issue_worksheet(self.teacher,self.circle,sheet.pk,timezone.localdate(),visible_to_students=True)
         self.assertEqual(self.client_for(self.student).get('/api/images/'+asset).status_code,200)
 
     def test_solution_images_are_filtered_from_json_files_and_direct_downloads(self):
@@ -101,7 +101,7 @@ class WorksheetBlockTests(TestCase):
             'statement_images':[{'id':statement}],'solution_images':[{'id':solution}]})
         with patch('core.documents.render_pdf',return_value=b'%PDF-1.4 test'):
             sheet=s.create_material(self.teacher,'worksheet',{'title':'Картинки','topics':[self.topic],'problems':[str(problem.pk)]})
-        s.issue_worksheet(self.teacher,self.circle,sheet.pk,timezone.localdate())
+        s.issue_worksheet(self.teacher,self.circle,sheet.pk,timezone.localdate(),visible_to_students=True)
         material=self.client_for(self.student).get('/api/my-problems/'+str(problem.pk))
         self.assertEqual(material.status_code,200);self.assertNotIn('solution_images',material.data)
         closed=project_for(sheet,[problem],[],True)

@@ -32,7 +32,7 @@ class ImagePermissionTests(TestCase):
         sheet=Worksheet.objects.create(document=document,author=cls.owner,title='Листок с рисунками')
         WorksheetItem.objects.create(worksheet=sheet,problem=cls.problem,position=1)
         sheet.published=True;sheet.save()
-        issue=WorksheetIssue.objects.create(circle=cls.circle,worksheet=sheet,document=document,issued_by=cls.owner,
+        issue=WorksheetIssue.objects.create(visible_to_students=True,circle=cls.circle,worksheet=sheet,document=document,issued_by=cls.owner,
             number=1,issued_on=timezone.localdate())
         Assignment.objects.create(issue=issue,student=cls.student.student)
 
@@ -55,7 +55,7 @@ class ImagePermissionTests(TestCase):
         sheet=Worksheet.objects.create(document=document,author=self.owner,title='Закрытое решение')
         WorksheetItem.objects.create(worksheet=sheet,problem=problem,position=1)
         sheet.published=True;sheet.save()
-        issue=WorksheetIssue.objects.create(circle=self.circle,worksheet=sheet,document=document,issued_by=self.owner,
+        issue=WorksheetIssue.objects.create(visible_to_students=True,circle=self.circle,worksheet=sheet,document=document,issued_by=self.owner,
             number=2,issued_on=timezone.localdate())
         Assignment.objects.create(issue=issue,student=self.student.student)
         self.assertTrue(can_read(self.student,self.assets[0]))

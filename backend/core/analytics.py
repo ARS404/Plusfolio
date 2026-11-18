@@ -7,7 +7,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from . import filters as f, services as s
 from .student_profiles import profile_scope
-from .models import (Assignment, Circle, CircleTeacher, Discussion, Problem, Solve,
+from .models import (Assignment, Circle, Discussion, Problem, Solve,
                      Student, Topic, TopicCatalogVersion, Worksheet, WorksheetItem, WorksheetIssue)
 
 
@@ -16,36 +16,40 @@ def percent(numerator, denominator):
 
 
 def scoped_assignments(user, params, *, student=None):
-    circles = s.group_circles_for(user) if student is not None else s.circles_for(user)
+    group_circles = s.group_circles_for(user)
     selected_circles = f.uuid_ids(f.query_values(params, 'circle'))
     if selected_circles is not None:
-        if set(str(pk) for pk in circles.filter(pk__in=selected_circles).values_list('pk', flat=True)) != selected_circles:
+        readable = group_circles if student is not None else s.circles_for(user)
+        found = readable.filter(pk__in=selected_circles).order_by().values_list('pk', flat=True)
+        if {str(pk) for pk in found} != selected_circles:
             raise s.NotFound('Кружок недоступен.')
-        circles = circles.filter(pk__in=selected_circles)
+        group_circles = group_circles.filter(pk__in=selected_circles)
     cities = f.query_values(params, 'city')
-    circles = f.by_city(circles, cities)
-    readable = set(circles.values_list('pk', flat=True))
-    if s.admin(user) or student is not None:
-        group_ids = readable
-    else:
-        group_ids = set()
-        if 'teacher' in user.roles:
-            group_ids.update(CircleTeacher.objects.filter(circle_id__in=readable, teacher__user=user, ended_at=None).values_list('circle_id', flat=True))
-        group_ids.update(s.analyst_circles_for(user).filter(pk__in=readable).values_list('pk', flat=True))
+    state = params.get('state', 'all')
+    group_circles = f.by_circle_state(f.by_city(group_circles, cities), state)
+    group_ids = set(group_circles.order_by().values_list('pk', flat=True))
     allowed = Q(issue__circle_id__in=group_ids)
-    if student is None and 'student' in user.roles:
+    include_personal = student is None and 'student' in user.roles and not s.admin(user)
+    if include_personal:
         personal = Q(student__user=user)
         if selected_circles is not None:
-            personal &= Q(issue__circle_id__in=readable)
+            personal &= Q(issue__circle_id__in=selected_circles)
         allowed |= personal
-    assignments = f.by_city(Assignment.objects.filter(allowed), cities, 'issue__circle__city')
+    assignments = Assignment.objects.filter(allowed, issue__visible_to_students=True)
+    if include_personal:
+        assignments = f.by_city(f.by_circle_state(assignments, state, 'issue__circle__archived'), cities, 'issue__circle__city')
     if student is not None:assignments=assignments.filter(student=student)
     assignments = f.by_tags(assignments, f.query_values(params, 'worksheet_tag'), 'worksheet', 'issue__worksheet__tags')
-    problems = f.by_tags(Problem.objects.all(), f.query_values(params, 'problem_tag'), 'problem')
+    problem_tags = f.query_values(params, 'problem_tag')
+    problems = f.by_tags(Problem.objects.all(), problem_tags, 'problem')
     topic_ids = s.topic_ids_in_branch(f.query_values(params, 'topic'))
     if topic_ids is not None:
         problems = problems.filter(topics__pk__in=topic_ids)
-    assignments = assignments.filter(Exists(WorksheetItem.objects.filter(worksheet_id=OuterRef('issue__worksheet_id'),problem__in=problems,include_in_journal=True))).distinct()
+    elif not problem_tags:
+        problems = None
+    items = WorksheetItem.objects.filter(worksheet_id=OuterRef('issue__worksheet_id'),include_in_journal=True)
+    if problems is not None:items=items.filter(problem__in=problems)
+    assignments = assignments.filter(Exists(items))
     return assignments, problems, group_ids
 
 
@@ -84,12 +88,15 @@ def report(user, params, *, student=None):
         pk__in=assignments.values('issue_id')).values_list('pk','worksheet_id','circle_id')}
     worksheet_ids = {wid for wid,_ in issues.values()}
     worksheet_problems = defaultdict(set)
-    for wid, pid in WorksheetItem.objects.filter(worksheet_id__in=worksheet_ids,include_in_journal=True).values_list('worksheet_id', 'problem_id'):
+    for wid, pid in WorksheetItem.objects.filter(worksheet_id__in=worksheet_ids,include_in_journal=True).order_by().values_list('worksheet_id', 'problem_id'):
         worksheet_problems[wid].add(pid)
-    selected_ids = set(selected_problems.filter(items__worksheet_id__in=worksheet_ids,items__include_in_journal=True).values_list('pk', flat=True).distinct())
-    selected_by_worksheet = {wid: pids & selected_ids for wid, pids in worksheet_problems.items()}
+    all_problem_ids = set().union(*worksheet_problems.values())
+    selected_by_worksheet = worksheet_problems
+    if selected_problems is not None:
+        selected_ids = set(selected_problems.filter(pk__in=all_problem_ids).order_by().values_list('pk', flat=True).distinct())
+        selected_by_worksheet = {wid: pids & selected_ids for wid, pids in worksheet_problems.items()}
     discussion_states={(cid,pid):(True,shown) for cid,pid,shown in Discussion.objects.filter(
-        circle_id__in={cid for _,cid in issues.values()},problem_id__in=set().union(*worksheet_problems.values()),discussed=True
+        circle_id__in={cid for _,cid in issues.values()},problem_id__in=all_problem_ids,discussed=True
     ).values_list('circle_id','problem_id','solution_visible')}
     discussed_by_circle=defaultdict(set)
     for cid,pid in discussion_states:discussed_by_circle[cid].add(pid)
@@ -124,19 +131,20 @@ def report(user, params, *, student=None):
             _merge_recipients(circle_problem_students[cid],pids,recipients,unions)
     selected_ids=set(problem_students)
     student_ids = set().union(*set(problem_students.values()))
-    all_problem_ids = set().union(*worksheet_problems.values())
     solved_by_problem = defaultdict(set)
     for sid,pid in Solve.objects.filter(solved=True, student_id__in=student_ids, problem_id__in=all_problem_ids).values_list('student_id', 'problem_id').iterator(chunk_size=2000):
         solved_by_problem[pid].add(sid)
-    problem_solved = {pid:recipients & solved_by_problem[pid] for pid,recipients in problem_students.items()}
-    assigned_count = sum(map(len,problem_students.values()))
-    solved_count = sum(map(len,problem_solved.values()))
+    problem_solved_counts = {}
+    assigned_count = solved_count = 0
     student_assigned, student_solved = Counter(), Counter()
     student_available,student_blocked=Counter(),Counter()
     available_count=blocked_count=0
     for pid,recipients in problem_students.items():
-        student_assigned.update(recipients); student_solved.update(problem_solved[pid])
-        unsolved=recipients-problem_solved[pid]
+        solved = recipients & solved_by_problem[pid]
+        problem_solved_counts[pid] = len(solved)
+        assigned_count += len(recipients); solved_count += len(solved)
+        student_assigned.update(recipients); student_solved.update(solved)
+        unsolved=recipients-solved
         if include_discussed:
             available=unsolved & available_problem_students.get(pid,frozenset())
             blocked=unsolved-available
@@ -154,7 +162,7 @@ def report(user, params, *, student=None):
         for pid in pids: problem_worksheets[pid].add(wid)
     rows = []
     for pid, recipients in problem_students.items():
-        count = len(problem_solved[pid])
+        count = problem_solved_counts[pid]
         rows.append({'problem_id': str(pid), 'public_id': f'P-{problems[pid].number_id}', 'title': problems[pid].display_title, 'recipients': len(recipients),
                      'solved': count, 'remaining': len(recipients)-count, 'percent': percent(count, len(recipients)),
                      'circle_count': len(problem_circles[pid]), 'worksheet_count': len(problem_worksheets[pid])})
@@ -184,23 +192,30 @@ def report(user, params, *, student=None):
     percentages = []
     distribution = [{'label': label, 'count': 0} for label in ['0%', '<25%', '25–<50%', '50–<75%', '75–<100%', '100%']]
     students_completed = students_with_solves = 0
-    pupils = Student.objects.filter(pk__in=student_ids).select_related('user').only('id','graduation_year','user__id','user__name').order_by('user__name')
-    # Mixed roles can add personal results outside the adult profile scope.
-    if group_ids and 'student' in user.roles and not s.admin(user):
-        pupils = pupils.annotate(can_view_profile=Exists(profile_scope(user).filter(pk=OuterRef('pk'))))
-    for pupil in pupils:
-        assigned = student_assigned[pupil.pk]; count = student_solved[pupil.pk]
+    for sid, assigned in student_assigned.items():
+        count = student_solved[sid]
         raw = 100*count/assigned
         percentages.append(raw); students_with_solves += bool(count); students_completed += count == assigned
-        bucket = 0 if not count else 5 if count == assigned else 1 if raw < 25 else 2 if raw < 50 else 3 if raw < 75 else 4
-        distribution[bucket]['count'] += 1
         if group_ids:
-            student_rows.append({'id': pupil.pk, 'public_id':f'S-{pupil.pk}', 'user_public_id':f'U-{pupil.user_id}', 'name': pupil.user.name, **pupil.education_info(),
+            bucket = 0 if not count else 5 if count == assigned else 1 if raw < 25 else 2 if raw < 50 else 3 if raw < 75 else 4
+            distribution[bucket]['count'] += 1
+    if group_ids:
+        if student is not None:
+            pupils = [student] if student.pk in student_assigned else []
+        else:
+            pupils = Student.objects.filter(pk__in=student_ids).select_related('user').only('id','graduation_year','user__id','user__name').order_by('user__name')
+            # Mixed roles can add personal results outside the adult profile scope.
+            if 'student' in user.roles and not s.admin(user):
+                pupils = pupils.annotate(can_view_profile=Exists(profile_scope(user).filter(pk=OuterRef('pk'))))
+        on_date = timezone.localdate()
+        for pupil in pupils:
+            sid = pupil.pk; assigned = student_assigned[sid]; count = student_solved[sid]
+            student_rows.append({'id': sid, 'public_id':f'S-{sid}', 'user_public_id':f'U-{pupil.user_id}', 'name': pupil.user.name, **pupil.education_info(on_date),
                                  'can_view_profile': getattr(pupil, 'can_view_profile', True),
-                                 'assigned': assigned, 'solved': count, 'remaining': assigned-count, 'available':student_available[pupil.pk], 'discussed_unsolved':student_blocked[pupil.pk], 'percent': round(raw, 1)})
+                                 'assigned': assigned, 'solved': count, 'remaining': assigned-count, 'available':student_available[sid], 'discussed_unsolved':student_blocked[sid], 'percent': percent(count, assigned)})
 
     # Ancestors roll up each unique student/task pair once, even with overlapping topics.
-    nodes = {node['id']: node for node in Topic.objects.values('id', 'number_id', 'name', 'parent_id')} if selected_ids else {}
+    nodes = {node['id']: node for node in Topic.objects.order_by().values('id', 'number_id', 'name', 'parent_id')} if selected_ids else {}
     ancestor_cache = {}
     def ancestors(tid):
         if tid not in ancestor_cache:
@@ -216,7 +231,7 @@ def report(user, params, *, student=None):
         topics = {tid for node in direct_topics[pid] for tid in ancestors(node) if nodes[tid]['parent_id'] is not None} or {None}
         for tid in topics:
             total = topic_totals.setdefault(tid, {'assigned': 0, 'solved': 0, 'students': set(), 'problems': set()})
-            total['assigned'] += len(recipients); total['solved'] += len(problem_solved[pid])
+            total['assigned'] += len(recipients); total['solved'] += problem_solved_counts[pid]
             total['students'].update(recipients); total['problems'].add(pid)
     topic_rows = []
     for tid, total in topic_totals.items():
@@ -248,9 +263,10 @@ def report(user, params, *, student=None):
         discussion = {'total': denominator, 'discussed': discussed, 'remaining': denominator-discussed,
                       'visible': visible, 'percent': percent(discussed, denominator)}
 
+    personal_only = student is None and 'student' in user.roles and not s.admin(user) and not group_ids
     return {
         **({'subject_student_id':student.pk} if student is not None else {}),
-        'include_discussed':include_discussed,'personal_only': not bool(group_ids), 'assigned_pairs': assigned_count, 'solved_pairs': solved_count,
+        'include_discussed':include_discussed,'personal_only':personal_only, 'assigned_pairs': assigned_count, 'solved_pairs': solved_count,
         'percent': percent(solved_count, assigned_count), 'student_count': len(student_ids), 'problem_count': len(problems), 'rows': rows,
         'counts': {'remaining_pairs': assigned_count-solved_count,'available_pairs':available_count,'discussed_unsolved_pairs':blocked_count, 'worksheet_count': len(worksheet_rows), 'issue_count': len(issue_ids),
                    'circle_count': len(circle_ids), 'full_worksheet_count': sum(row['completed_recipients'] for row in worksheet_rows),

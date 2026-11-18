@@ -45,6 +45,17 @@ def by_city(queryset, raw, field='city'):
     return queryset.alias(_filter_city=Trim(field)).filter(_filter_city__in=cities) if cities else queryset
 
 
+CIRCLE_STATES = ('all', 'active', 'archived')
+
+
+def by_circle_state(queryset, state, field='archived'):
+    if state not in CIRCLE_STATES:
+        raise ValidationError('state: all/active/archived.')
+    if state == 'all':
+        return queryset
+    return queryset.filter(**{field: state == 'archived'})
+
+
 def by_tags(queryset, raw, kind, field='tags'):
     ids = tag_ids(raw, kind)
     return queryset.filter(**{field+'__pk__in': ids}).distinct() if ids is not None else queryset

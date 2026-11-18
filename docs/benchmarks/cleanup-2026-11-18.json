@@ -1,0 +1,78 @@
+{
+  "date": "2026-11-18",
+  "scope": "Local uncommitted maintenance changes. Synthetic data only.",
+  "environment": {
+    "os": "Darwin",
+    "architecture": "arm64",
+    "python": "3.14.2",
+    "django": "5.2.18",
+    "openpyxl": "3.1.5",
+    "database": "SQLite"
+  },
+  "worksheet_issue_batch": {
+    "fixture": "core.test_performance.QueryBudgetTests, POST circle issues, hidden worksheets",
+    "worksheet_counts": [
+      1,
+      10,
+      40
+    ],
+    "sql_before": [
+      14,
+      95,
+      365
+    ],
+    "sql_after": [
+      12,
+      12,
+      12
+    ],
+    "http_status": 200
+  },
+  "analytics_selects": {
+    "teacher": {
+      "before": 14,
+      "after": 13
+    },
+    "student": {
+      "before": 11,
+      "after": 10
+    },
+    "analyst": {
+      "before": 14,
+      "after": 13
+    },
+    "student_profile": {
+      "before": 14,
+      "after": 12
+    }
+  },
+  "xlsx": {
+    "students": 990,
+    "problems": 1000,
+    "budget_cells_including_headers": 998998,
+    "empty_marks_before": {
+      "peak_rss_mib": 548.8,
+      "elapsed_seconds": 20.03
+    },
+    "empty_marks_streamed": {
+      "baseline_rss_mib": 84.9,
+      "peak_rss_mib": 92.0,
+      "elapsed_seconds": 21.42
+    },
+    "dense_marks_streamed": {
+      "solved_pairs": 990000,
+      "baseline_rss_mib": 83.9,
+      "peak_rss_mib": 231.5,
+      "elapsed_seconds": 24.86
+    },
+    "method": "Fresh isolated Python processes, resource.ru_maxrss. Writer and solved-index measurement. Whole pipeline flock/job-directory checked with synthetic snapshot.",
+    "cleanup": "Normal completion and injected OSError left no XML or job directory. One shared .lock file is retained. Interrupted jobs older than 60 seconds are pruned on the next export.",
+    "concurrency": "Real second flock rejected before select_issues. HTTP 429 includes Retry-After."
+  },
+  "limitations": [
+    "Single local runs, elapsed times are indicative.",
+    "Process RSS excludes database and container memory.",
+    "XLSX maximum-shape benchmark uses synthetic snapshot, separate from full ORM tests.",
+    "PostgreSQL native concurrency and query execution were not run. PostgreSQL export SQL was compiled."
+  ]
+}

@@ -1,4 +1,5 @@
 import base64, hashlib, json, secrets
+from collections.abc import Mapping
 from datetime import timedelta
 from itertools import batched
 from uuid import UUID
@@ -43,23 +44,75 @@ def group_circles_for(user):
     if 'teacher' in user.roles:q|=Q(Exists(CircleTeacher.objects.filter(circle_id=OuterRef('pk'),teacher__user=user,ended_at=None)))
     if 'analyst' in user.roles:q|=Q(pk__in=analyst_circles_for(user))
     return Circle.objects.filter(q)
-def get_circle(user,pk,write=False):
-    circle=circles_for(user).filter(pk=pk).first()
+def get_circle(user,pk,write=False,*,lock=False):
+    circles = circles_for(user)
+    if lock:
+        circles = circles.select_for_update()
+    circle = circles.filter(pk=pk).first()
     if not circle: raise NotFound('Кружок недоступен.')
     if write:
-        require(admin(user) or ('teacher' in user.roles and CircleTeacher.objects.filter(circle=circle,teacher__user=user,ended_at=None).exists()))
+        require(can_manage_circle_state(user,circle))
         if circle.archived: raise ValidationError('Кружок в архиве.')
     return circle
+
+def can_manage_circle_state(user,circle):
+    return admin(user) or ('teacher' in user.roles and CircleTeacher.objects.filter(circle=circle,teacher__user=user,ended_at=None).exists())
+
 def can_write(user,circle):
-    return not circle.archived and (admin(user) or ('teacher' in user.roles and CircleTeacher.objects.filter(circle=circle,teacher__user=user,ended_at=None).exists()))
+    return not circle.archived and can_manage_circle_state(user,circle)
+
+def lock_writable_circle(user,circle):
+    circle = Circle.objects.select_for_update().get(pk=circle.pk)
+    require(can_write(user,circle),'Кружок в архиве.' if circle.archived else 'Недостаточно прав.')
+    return circle
+
+@transaction.atomic
+def set_circle_archived(user,pk,archived):
+    circle = get_circle(user,pk,lock=True)
+    require(can_manage_circle_state(user,circle))
+    if type(archived) is not bool:
+        raise ValidationError('archived: передайте true или false.')
+    if circle.archived != archived:
+        circle.archived = archived
+        circle.save(update_fields=['archived'])
+        audit(user,'circle.archive' if archived else 'circle.restore',{'archived':archived},circle)
+    return circle
 def can_analyse_group(user,circle=None):
     if admin(user): return True
     if circle is None: return bool({'teacher','analyst'}&set(user.roles))
     return ('teacher' in user.roles and CircleTeacher.objects.filter(circle=circle,teacher__user=user,ended_at=None).exists()) or ('analyst' in user.roles and circle.tags.filter(pk__in=AnalystGrant.objects.filter(user=user).values('tag_id')).exists())
+def issues_for(user):
+    issues = WorksheetIssue.objects.all()
+    if admin(user):
+        return issues
+    scope=Q(circle__in=group_circles_for(user))
+    if 'student' in user.roles:
+        enrolled=Enrollment.objects.filter(circle_id=OuterRef('circle_id'),student__user=user,left_at=None)
+        scope|=Q(Exists(enrolled),visible_to_students=True)
+    return issues.filter(scope)
+
+
+def circle_materials(user,kind,circle):
+    model=Problem if kind=='problem' else Worksheet
+    issues=issues_for(user).filter(circle=circle)
+    return model.objects.filter(published=True).filter(issued_material_filter(kind,issues))
+
+
+def issued_material_filter(kind,issues):
+    worksheets = issues.order_by().values('worksheet_id')
+    if kind == 'problem':
+        return Q(Exists(WorksheetItem.objects.filter(problem_id=OuterRef('pk'),worksheet_id__in=worksheets)))
+    return Q(pk__in=worksheets)
+
+
+def student_assignments(user):
+    return Assignment.objects.filter(student__user=user,issue__visible_to_students=True)
+
+
 def problems_for(user):
     qs=Problem.objects.filter(published=True)
     if admin(user) or 'teacher' in user.roles: return qs
-    q=Q(Exists(WorksheetItem.objects.filter(problem_id=OuterRef('pk'),worksheet__issues__circle__in=circles_for(user))))
+    q=issued_material_filter('problem',issues_for(user))
     if 'student' in user.roles:q|=Q(Exists(Solve.objects.filter(problem_id=OuterRef('pk'),student__user=user,solved=True)))
     return qs.filter(q)
 
@@ -81,15 +134,16 @@ def worksheets_for(user):
     if admin(user):return qs
     from .people import has_adult_role
     visible=Q(document__author=user)|Q(document__public_revision_id=F('pk')) if has_adult_role(user) else Q(pk__in=[])
-    visible|=Q(Exists(WorksheetIssue.objects.filter(worksheet_id=OuterRef('pk'),circle__in=circles_for(user))))
-    if 'student' in user.roles:visible|=Q(Exists(Assignment.objects.filter(issue__worksheet_id=OuterRef('pk'),student__user=user)))
+    visible|=issued_material_filter('worksheet',issues_for(user))
+    if 'student' in user.roles:visible|=Q(Exists(student_assignments(user).filter(issue__worksheet_id=OuterRef('pk'))))
     return qs.filter(visible)
 def my_problems_for(user):
     require('student' in user.roles)
-    return Problem.objects.filter(published=True).filter(Exists(WorksheetItem.objects.filter(problem_id=OuterRef('pk'),worksheet__issues__assignments__student__user=user)))
+    worksheets = student_assignments(user).order_by().values('issue__worksheet_id')
+    return Problem.objects.filter(published=True).filter(Exists(WorksheetItem.objects.filter(problem_id=OuterRef('pk'),worksheet_id__in=worksheets)))
 def my_worksheets_for(user):
     require('student' in user.roles)
-    return Worksheet.objects.filter(published=True).filter(Exists(Assignment.objects.filter(issue__worksheet_id=OuterRef('pk'),student__user=user)))
+    return Worksheet.objects.filter(published=True).filter(Exists(student_assignments(user).filter(issue__worksheet_id=OuterRef('pk'))))
 def solutions_for(user, problems, circle=None):
     """One solution scope for material views, documents and search."""
     if admin(user) or 'teacher' in user.roles:
@@ -102,7 +156,7 @@ def solutions_for(user, problems, circle=None):
         revealed = Discussion.objects.filter(
             problem_id=OuterRef('pk'), discussed=True, solution_visible=True,
             circle__enrollments__student__user=user, circle__enrollments__left_at=None,
-            circle__issues__worksheet__items__problem_id=OuterRef('pk'))
+            circle__issues__visible_to_students=True, circle__issues__worksheet__items__problem_id=OuterRef('pk'))
         if circle is not None:
             revealed = revealed.filter(circle=circle)
         allowed |= Q(Exists(revealed))
@@ -247,7 +301,7 @@ def create_material(user,kind,data,*,_document=None,_base=None):
 
 @transaction.atomic
 def enroll(user,circle,email='',student_id=None):
-    require(can_write(user,circle))
+    circle = lock_writable_circle(user,circle)
     if student_id is not None:
         if type(student_id) is not int or student_id<=0:raise ValidationError('Выберите школьника из подсказок.')
         account=User.objects.filter(student__pk=student_id,is_active=True).first()
@@ -262,7 +316,7 @@ def enroll(user,circle,email='',student_id=None):
 
 def assign_issues(student,issues):
     assigned=Assignment.objects.filter(student=student,issue_id=OuterRef('pk'))
-    missing=issues.filter(~Exists(assigned)).order_by('pk')
+    missing=issues.filter(~Exists(assigned),visible_to_students=True).order_by('pk')
     last_issue=0
     # Finish each read before writing assignments. Keyset pages stay bounded
     # and do not depend on a live cursor observing changes to its own subquery.
@@ -273,7 +327,7 @@ def assign_issues(student,issues):
 
 @transaction.atomic
 def update_student(user,circle,student_id,data):
-    require(can_write(user,circle))
+    circle = lock_writable_circle(user,circle)
     student=Student.objects.select_for_update().filter(pk=student_id,enrollments__circle=circle,enrollments__left_at=None).first()
     if not student:raise NotFound('Действующий участник кружка не найден.')
     if set(data)!={'graduation_year'}:raise ValidationError('Укажите только год окончания 11-го класса.')
@@ -289,7 +343,7 @@ def update_student(user,circle,student_id,data):
 
 @transaction.atomic
 def unenroll(user,circle,email):
-    require(can_write(user,circle))
+    circle = lock_writable_circle(user,circle)
     memberships=Enrollment.objects.filter(circle=circle,student__user__email=email.strip().lower(),left_at=None)
     memberships.update(left_at=timezone.now())
     Invitation.objects.filter(circle=circle,email=email.strip().lower(),role='student',state='pending').update(state='revoked')
@@ -298,6 +352,7 @@ def unenroll(user,circle,email):
 @transaction.atomic
 def assign_teacher(user,circle,email,remove=False):
     require(admin(user),'Назначать и отзывать преподавателей напрямую может администратор.')
+    circle = lock_writable_circle(user,circle)
     from .identifiers import typed_id
     from .people import search_people
     candidates=User.objects.filter(is_active=True)
@@ -310,26 +365,48 @@ def assign_teacher(user,circle,email,remove=False):
         if circle.launched_at is None:circle.launched_at=timezone.now();circle.save()
     audit(user,'teacher.end' if remove else 'teacher.add',{'user':account.pk},circle)
 
+def issue_worksheet(user,circle,worksheet_id,issued_on,*,visible_to_students=False):
+    return issue_worksheets(user,circle,[worksheet_id],issued_on,visible_to_students=visible_to_students)[0]
+
+
 @transaction.atomic
-def issue_worksheet(user,circle,worksheet_id,issued_on):
-    require(can_write(user,circle))
-    Circle.objects.select_for_update().get(pk=circle.pk)
+def issue_worksheets(user,circle,worksheet_ids,issued_on,*,visible_to_students=False):
     from .worksheets import catalogue
-    worksheet=catalogue(user).filter(pk=worksheet_id,archived=False).first()
-    if not worksheet:raise ValidationError('Листок недоступен.')
+    circle = lock_writable_circle(user,circle)
+    worksheet_ids = list(dict.fromkeys(str(pk) for pk in worksheet_ids))
+    if not worksheet_ids:raise ValidationError('Выберите листки для выдачи.')
+    selected = catalogue(user).filter(pk__in=worksheet_ids,archived=False).order_by().values_list('pk','document_id')
+    revisions = {str(pk):(pk,document_id) for pk,document_id in selected}
+    if len(revisions)!=len(worksheet_ids):raise ValidationError('Листок недоступен.')
     if issued_on>timezone.localdate():raise ValidationError('Дата не может быть в будущем.')
-    if WorksheetIssue.objects.filter(circle=circle,document_id=worksheet.document_id).exists():raise ValidationError('Этот листок уже выдан кружку.')
-    number=(circle.issues.aggregate(last=Max('number'))['last'] or 0)+1
-    issue=WorksheetIssue.objects.create(circle=circle,worksheet=worksheet,document_id=worksheet.document_id,issued_on=issued_on,issued_by=user,number=number)
-    students=circle.enrollments.filter(left_at=None).order_by('pk').values_list('student_id',flat=True)
+    document_ids = {document_id for _,document_id in revisions.values()}
+    if len(document_ids)!=len(revisions) or circle.issues.filter(document_id__in=document_ids).exists():
+        raise ValidationError('Этот листок уже выдан кружку.')
+    first_number = (circle.issues.aggregate(last=Max('number'))['last'] or 0)+1
+    issues = WorksheetIssue.objects.bulk_create([
+        WorksheetIssue(circle=circle,worksheet_id=revisions[worksheet_id][0],document_id=revisions[worksheet_id][1],issued_on=issued_on,
+                       issued_by=user,number=number,visible_to_students=visible_to_students)
+        for number,worksheet_id in enumerate(worksheet_ids,first_number)
+    ])
+    if visible_to_students:
+        for issue in issues:
+            assign_current_students(issue)
+    AuditEvent.objects.bulk_create([
+        AuditEvent(actor=user,kind='worksheet.issue',payload={'worksheet':worksheet_id,'visible_to_students':visible_to_students},circle=circle)
+        for worksheet_id in worksheet_ids
+    ])
+    return issues
+
+
+def assign_current_students(issue):
+    students=Enrollment.objects.filter(circle_id=issue.circle_id,left_at=None).order_by('pk').values_list('student_id',flat=True)
     for student_ids in batched(students.iterator(),ASSIGNMENT_BATCH_SIZE):
         Assignment.objects.bulk_create([Assignment(issue=issue,student_id=pk) for pk in student_ids])
-    audit(user,'worksheet.issue',{'worksheet':str(worksheet.pk)},circle)
-    return issue
 
 def selection_ids(data,plural,singular):
     """Validate an explicit nonempty batch before any writes; keep scalar clients working."""
     from .filters import uuid_ids
+    if not isinstance(data,Mapping):raise ValidationError('Передайте JSON-объект.')
     values=data.get(plural) if plural in data else [data.get(singular)]
     if not isinstance(values,list) or not values or len(values)>300 or any(not isinstance(value,str) or ',' in value for value in values):
         raise ValidationError('Выберите от 1 до 300 записей.')
@@ -339,10 +416,10 @@ def selection_ids(data,plural,singular):
 class Conflict(Exception):pass
 @transaction.atomic
 def mark(user,circle,problem_id,data,discussion=False,solution_visibility=False):
-    require(can_write(user,circle))
-    Circle.objects.select_for_update().get(pk=circle.pk)
+    circle = lock_writable_circle(user,circle)
     scope={'items__worksheet__issues__circle':circle}
-    if not (discussion or solution_visibility):scope['items__include_in_journal']=True
+    if not (discussion or solution_visibility):
+        scope.update(items__include_in_journal=True,items__worksheet__issues__visible_to_students=True)
     problem=Problem.objects.only('pk').filter(pk=problem_id,**scope).first()
     if not problem:raise ValidationError('Задача не выдавалась этому кружку.')
     value=data.get('value');version=data.get('version')
@@ -380,37 +457,95 @@ def mark(user,circle,problem_id,data,discussion=False,solution_visibility=False)
     audit(user,'solution.visibility' if solution_visibility else 'discussion.change' if discussion else 'solve.change',payload,circle)
     return result
 
+def invitation_circles_for(user,role):
+    circles=Circle.objects.filter(archived=False)
+    if role not in {'student','teacher'}:raise ValidationError('invite_role: student или teacher.')
+    if RANK[role]>=max((RANK[r] for r in user.roles),default=0):return circles.none()
+    if admin(user):return circles
+    allowed=Q(pk__in=[])
+    if role=='student' and 'teacher' in user.roles:
+        allowed|=Q(Exists(CircleTeacher.objects.filter(circle_id=OuterRef('pk'),teacher__user=user,ended_at=None)))
+    if 'analyst' in user.roles:
+        allowed|=Q(pk__in=analyst_circles_for(user),launched_at__isnull=False)
+    return circles.filter(allowed)
+
+
 def invitation_allowed(user,role,circle):
     if role not in RANK:return False
-    if role=='admin':return admin(user)
-    if RANK[role]>=max(RANK[r] for r in user.roles):return False
-    if role=='analyst':return admin(user)
+    if role in {'admin','analyst'}:return admin(user)
     if not circle or circle.archived:return False
-    if role=='teacher':return admin(user) or ('analyst' in user.roles and circle.launched_at is not None and analyst_circles_for(user).filter(pk=circle.pk).exists())
-    return admin(user) or can_write(user,circle) or ('analyst' in user.roles and circle.launched_at is not None and analyst_circles_for(user).filter(pk=circle.pk).exists())
+    return admin(user) or invitation_circles_for(user,role).filter(pk=circle.pk).exists()
 def cipher():return Fernet(base64.urlsafe_b64encode(hashlib.sha256(settings.SECRET_KEY.encode()).digest()))
 
 @transaction.atomic
+def invite_many(user,email,role,circle_ids,tag_ids=None):
+    # Take batch locks in a stable order and keep the caller's order in the response.
+    circles = circles_for(user).filter(pk__in=circle_ids).order_by('pk').select_for_update()
+    found = {str(circle.pk):circle for circle in circles}
+    if len(found)!=len(circle_ids):raise NotFound('Кружок недоступен.')
+    return _create_invitations(user,email,role,[found[pk] for pk in circle_ids],tag_ids)
+
+@transaction.atomic
 def invite(user,email,role,circle=None,tag_ids=None):
+    if circle is not None:
+        circle = Circle.objects.select_for_update().get(pk=circle.pk)
+    return _create_invitations(user,email,role,[circle],tag_ids)[0]
+
+
+def _create_invitations(user,email,role,circles,tag_ids):
     from django.core.validators import validate_email
+    from .mail_backend import check_capacity, locked_budget
+    if not circles:return []
     email=email.strip().lower();validate_email(email)
-    require(invitation_allowed(user,role,circle),'Нельзя пригласить эту роль в выбранную область.')
+    if role in {'student','teacher'} and not admin(user):
+        circle_ids={circle.pk for circle in circles if circle is not None}
+        allowed=len(circle_ids)==len(circles) and invitation_circles_for(user,role).filter(pk__in=circle_ids).count()==len(circle_ids)
+    else:
+        allowed=all(invitation_allowed(user,role,circle) for circle in circles)
+    require(allowed,'Нельзя пригласить эту роль в выбранную область.')
     tags=list(Tag.objects.filter(pk__in=tag_ids or [],kind='circle',archived=False))
     if role=='analyst' and (not tags or len(tags)!=len(set(tag_ids or []))):raise ValidationError('Выберите теги кружков для аналитика.')
-    Invitation.objects.filter(email=email,role=role,circle=circle,state='pending').update(state='revoked')
-    from .mail_backend import check_invitation_capacity
-    check_invitation_capacity()
-    token=secrets.token_urlsafe(32)
-    invitation=Invitation.objects.create(email=email,role=role,circle=circle,created_by=user,token_hash=hashlib.sha256(token.encode()).hexdigest(),expires_at=timezone.now()+timedelta(days=7))
-    invitation.tags.set(tags)
-    payload={'to':email,'subject':'Приглашение в Plusfolio','token':token,'role':role,'circle':circle.name if circle else None}
-    EmailOutbox.objects.create(invitation=invitation,encrypted_payload=cipher().encrypt(json.dumps(payload,ensure_ascii=False).encode()).decode())
-    audit(user,'invitation.create',{'invitation':str(invitation.pk),'role':role},circle)
-    return invitation
+    # Serialise replacement, including invitations without a circle, and reserve the whole batch.
+    budget=locked_budget()
+    pending=Invitation.objects.filter(email=email,role=role,state='pending')
+    if circles[0] is None:
+        pending=pending.filter(circle__isnull=True)
+    else:
+        pending=pending.filter(circle__in=circles)
+    pending.update(state='revoked')
+    check_capacity(budget,len(circles))
+    invitations, letters, events = [], [], []
+    encryptor = cipher()
+    expires_at = timezone.now()+timedelta(days=7)
+    for circle in circles:
+        token=secrets.token_urlsafe(32)
+        invitation=Invitation(email=email,role=role,circle=circle,created_by=user,
+            token_hash=hashlib.sha256(token.encode()).hexdigest(),expires_at=expires_at)
+        payload={'to':email,'subject':'Приглашение в Plusfolio','token':token,'role':role,'circle':circle.name if circle else None}
+        letters.append(EmailOutbox(invitation=invitation,encrypted_payload=encryptor.encrypt(json.dumps(payload,ensure_ascii=False).encode()).decode()))
+        events.append(AuditEvent(actor=user,kind='invitation.create',payload={'invitation':str(invitation.pk),'role':role},circle=circle))
+        invitations.append(invitation)
+    Invitation.objects.bulk_create(invitations)
+    if tags:
+        Invitation.tags.through.objects.bulk_create([
+            Invitation.tags.through(invitation=invitation,tag=tag) for invitation in invitations for tag in tags
+        ])
+    EmailOutbox.objects.bulk_create(letters)
+    AuditEvent.objects.bulk_create(events)
+    return invitations
+
 
 def valid_invitation(token,lock=False):
-    qs=Invitation.objects.select_for_update() if lock else Invitation.objects.select_related('created_by','circle')
-    invitation=qs.filter(token_hash=hashlib.sha256(token.encode()).hexdigest()).first()
+    qs = Invitation.objects.filter(token_hash=hashlib.sha256(token.encode()).hexdigest())
+    if lock:
+        # Take the circle lock first, as when issuing or replacing an invitation.
+        circle_id = qs.values_list('circle_id', flat=True).first()
+        circle = Circle.objects.select_for_update().get(pk=circle_id) if circle_id else None
+        invitation = qs.select_for_update().first()
+        if invitation is not None and circle is not None:
+            invitation.circle = circle
+    else:
+        invitation = qs.select_related('created_by','circle').first()
     if not invitation or invitation.state!='pending' or invitation.expires_at<=timezone.now():raise ValidationError('Приглашение истекло, отозвано или уже использовано.')
     require(invitation.created_by.is_active and invitation_allowed(invitation.created_by,invitation.role,invitation.circle),'Отправитель больше не может выдать доступ.')
     return invitation

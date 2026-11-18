@@ -31,7 +31,7 @@ class WorksheetJournalOptionsTests(TestCase):
     def sheet(self,**values):
         return s.create_material(self.teacher,'worksheet',{'title':'Настройки задач','topics':[self.topic],'numbering_start':0,'blocks':self.blocks(),**values})
     def issue(self,sheet):
-        s.issue_worksheet(self.teacher,self.circle,sheet.pk,timezone.localdate());return sheet.issues.get()
+        s.issue_worksheet(self.teacher,self.circle,sheet.pk,timezone.localdate(),visible_to_students=True);return sheet.issues.get()
 
     def test_options_persist_and_all_tasks_remain_in_full_material(self):
         sheet=self.sheet();data=self.client_for().get('/api/worksheet-documents/'+str(sheet.document_id)).data

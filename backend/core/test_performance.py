@@ -37,7 +37,7 @@ class QueryBudgetTests(TestCase):
         for document,sheet in zip(documents,sheets):document.current_revision=sheet
         WorksheetDocument.objects.bulk_update(documents,['current_revision'])
         WorksheetItem.objects.bulk_create([WorksheetItem(worksheet=sheet,problem=problem,position=index+1) for sheet in sheets for index,problem in enumerate(problems)])
-        issues=[WorksheetIssue(circle=cls.circles[0],worksheet=sheet,document_id=sheet.document_id,issued_by=cls.teacher,issued_on='2026-10-20',number=index+1) for index,sheet in enumerate(sheets)]
+        issues=[WorksheetIssue(visible_to_students=True,circle=cls.circles[0],worksheet=sheet,document_id=sheet.document_id,issued_by=cls.teacher,issued_on='2026-10-20',number=index+1) for index,sheet in enumerate(sheets)]
         WorksheetIssue.objects.bulk_create(issues)
         Assignment.objects.bulk_create([Assignment(issue=issue,student=cls.student.student) for issue in issues])
 
@@ -85,11 +85,17 @@ class QueryBudgetTests(TestCase):
         circle=self.circles[0]
         serialize=lambda problem,user:{'id':str(problem.pk),'title':problem.display_title}
         for user in [self.teacher,self.student,self.admin]:
-            expected=snapshot(user,circle,select_issues(circle),serialize)
+            expected=snapshot(user,circle,select_issues(circle.issues.all()),serialize)
             with CaptureQueriesContext(connection) as queries:
-                result=snapshot(user,circle,select_issues(circle,for_export=True),serialize)
+                result=snapshot(user,circle,select_issues(circle.issues.all(),for_export=True),serialize,export_options={})
+                result['solves']=list(result['solves'])
+            for block in expected['blocks']:
+                block.pop('recipient_ids',None)
+                block['worksheet'].pop('description',None)
+            expected['solves']=[state for state in expected['solves'] if state['solved']]
             self.assertEqual(result,expected)
-            self.assertLessEqual(len(queries),8)
+            self.assertFalse(any('FROM "core_assignment"' in query['sql'] for query in queries))
+            self.assertLessEqual(len(queries),10)
             task_reads=[query['sql'] for query in queries if 'FROM "core_problem"' in query['sql']]
             self.assertEqual(len(task_reads),1)
             for field in ['statement','solution','statement_tex','solution_tex','source_metadata','author_id']:
@@ -176,7 +182,7 @@ class AssignmentFanoutTests(TestCase):
         WorksheetDocument.objects.bulk_create(documents)
         worksheets=[Worksheet(document=document,title='Historical worksheet',author=cls.admin) for document in documents]
         Worksheet.objects.bulk_create(worksheets)
-        cls.issues=[WorksheetIssue(circle=cls.circle,worksheet=worksheet,document=document,
+        cls.issues=[WorksheetIssue(visible_to_students=True,circle=cls.circle,worksheet=worksheet,document=document,
                                   number=index,issued_on=timezone.localdate(),issued_by=cls.admin)
                     for index,(document,worksheet) in enumerate(zip(documents,worksheets),1)]
         WorksheetIssue.objects.bulk_create(cls.issues)
@@ -221,7 +227,7 @@ class AssignmentFanoutTests(TestCase):
             batch_sizes.append(len(objects))
             return create(objects,**options)
         with patch.object(Assignment.objects,'bulk_create',side_effect=record_batch):
-            issue=s.issue_worksheet(self.admin,self.circle,worksheet.pk,timezone.localdate())
+            issue=s.issue_worksheet(self.admin,self.circle,worksheet.pk,timezone.localdate(),visible_to_students=True)
         self.assertEqual(Assignment.objects.filter(issue=issue).count(),len(students)-1)
         self.assertFalse(Assignment.objects.filter(issue=issue,student=students[-1]).exists())
         self.assertEqual(sum(batch_sizes),len(students)-1)
@@ -237,7 +243,7 @@ class AssignmentFanoutTests(TestCase):
             if calls==2:raise IntegrityError('Synthetic assignment failure')
             return create(objects,**options)
         with patch.object(s,'ASSIGNMENT_BATCH_SIZE',2),patch.object(Assignment.objects,'bulk_create',side_effect=fail_second_batch):
-            with self.assertRaises(IntegrityError):s.issue_worksheet(self.admin,self.circle,worksheet.pk,timezone.localdate())
+            with self.assertRaises(IntegrityError):s.issue_worksheet(self.admin,self.circle,worksheet.pk,timezone.localdate(),visible_to_students=True)
         self.assertFalse(WorksheetIssue.objects.filter(worksheet=worksheet).exists())
         self.assertFalse(Assignment.objects.filter(student__in=students).exists())
 

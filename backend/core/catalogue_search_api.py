@@ -5,7 +5,7 @@ from rest_framework.decorators import api_view
 from rest_framework.exceptions import Throttled
 from rest_framework.response import Response
 from . import services as s, filters as f, queries as read
-from .models import Topic
+from .models import Topic, Worksheet
 from .identifiers import typed_id, search_entities, public_id, uuid_id
 from .catalogue_search import retrieve
 
@@ -28,16 +28,16 @@ def catalogue_search(request):
         if scope!='available':raise ValidationError('Для кружков scope=available.')
         rows=f.by_city(s.circles_for(request.user),f.query_values(params,'city'))
         rows=f.by_tags(rows,f.query_values(params,'tag'),'circle')
-        state=params.get('state','all')
-        if state not in {'active','all'}:raise ValidationError('state: active/all.')
-        if state=='active':rows=rows.filter(archived=False)
+        rows=f.by_circle_state(rows, params.get('state','all'))
+        if params.get('invite_role'):
+            rows=rows.filter(pk__in=s.invitation_circles_for(request.user,params['invite_role']))
         number='number_id';fields=('name','description','city','region');uuids=('pk',)
     elif kind=='worksheet':
         from .worksheets import catalogue
         if scope=='my':rows=s.my_worksheets_for(request.user)
         elif scope=='issued':
-            circles=s.circles_for(request.user).filter(pk__in=f.query_values(params,'circle'))
-            rows=s.worksheets_for(request.user).filter(issues__circle__in=circles).distinct()
+            issues=s.issues_for(request.user).filter(circle_id__in=f.query_values(params,'circle'))
+            rows=Worksheet.objects.filter(published=True).filter(s.issued_material_filter('worksheet',issues))
         else:rows=catalogue(request.user,scope)
         rows=f.by_tags(rows,f.query_values(params,'tag'),'worksheet')
         topics=s.topic_ids_in_branch(f.query_values(params,'topic'))

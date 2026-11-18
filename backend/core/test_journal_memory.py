@@ -42,13 +42,13 @@ class JournalLoadingTests(TestCase):
         WorksheetItem.objects.bulk_create([WorksheetItem(worksheet=sheet,problem=problem,position=position,include_in_journal=index==1)
             for index,(problem,position) in enumerate(zip(cls.problems,[3,8,12]))])
         sheet.published=True;sheet.save()
-        WorksheetIssue.objects.create(circle=cls.circle,worksheet=sheet,document=document,issued_by=cls.owner,
+        WorksheetIssue.objects.create(visible_to_students=True,circle=cls.circle,worksheet=sheet,document=document,issued_by=cls.owner,
             number=1,issued_on=timezone.localdate())
 
     def test_excluded_bodies_are_not_fetched_but_all_numbering_positions_remain(self):
         for for_export in [False,True]:
             with self.subTest(for_export=for_export):
-                with CaptureQueriesContext(connection) as queries:selected=select_issues(self.circle,for_export=for_export)
+                with CaptureQueriesContext(connection) as queries:selected=select_issues(self.circle.issues.all(),for_export=for_export)
                 problem_reads=[query['sql'] for query in queries if 'FROM "core_problem"' in query['sql']]
                 self.assertEqual(len(problem_reads),1)
                 for problem in [self.problems[0],self.problems[2]]:

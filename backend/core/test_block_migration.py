@@ -6,7 +6,7 @@ from django.test import TransactionTestCase
 
 class WorksheetBlockMigrationTests(TransactionTestCase):
     def test_upgrade_from_1_0_2_preserves_content_and_initializes_issue_versions_once(self):
-        target=[('core','0019_issue_edit_version')]
+        target=[('core','0020_issue_visibility')]
         executor=MigrationExecutor(connection)
         try:
             executor.migrate([('core','0018_worksheet_journal_options')])
@@ -38,21 +38,37 @@ class WorksheetBlockMigrationTests(TransactionTestCase):
             names=['User','Student','Teacher','Circle','CircleTeacher','Enrollment','Problem','ImageAsset','WorksheetDocument','Worksheet','WorksheetBlock','WorksheetItem','WorksheetIssue','Assignment','Solve','Discussion']
             fields={name:[field.attname for field in model(name)._meta.concrete_fields] for name in names}
             before={name:list(model(name).objects.order_by('pk').values_list(*fields[name])) for name in names}
+            intermediate=[('core','0019_issue_edit_version')]
+            executor=MigrationExecutor(connection);executor.migrate(intermediate)
+            middle=executor.loader.project_state(intermediate).apps.get_model('core','WorksheetIssue').objects
+            self.assertEqual(list(middle.values_list('version',flat=True)),[1])
+            middle.filter(pk=issue.pk).update(version=7)
             executor=MigrationExecutor(connection);executor.migrate(target)
             after=executor.loader.project_state(target).apps
             for name in names:
                 with self.subTest(model=name):
                     self.assertEqual(list(after.get_model('core',name).objects.order_by('pk').values_list(*fields[name])),before[name])
             issues=after.get_model('core','WorksheetIssue').objects
-            self.assertEqual(list(issues.values_list('version',flat=True)),[1])
+            self.assertEqual(list(issues.values_list('version',flat=True)),[7])
             self.assertEqual(list(after.get_model('core','WorksheetBlock').objects.get(pk=text.pk).assets.values_list('pk',flat=True)),[image.pk])
             for task in tasks:
                 self.assertEqual(list(after.get_model('core','Problem').objects.get(pk=task.pk).statement_assets.values_list('pk',flat=True)),[image.pk])
             issues.filter(pk=issue.pk).update(version=7)
             MigrationExecutor(connection).migrate(target)
             self.assertEqual(issues.get(pk=issue.pk).version,7)
-        finally:
+            self.assertTrue(issues.get(pk=issue.pk).visible_to_students)
+            circles=after.get_model('core','Circle').objects
+            number=after.get_model('core','CircleNumber').objects.create()
+            second_circle=circles.create(number=number,created_by_id=owner.pk,name='Новая выдача 1.1.0')
+            staged=issues.create(circle=second_circle,worksheet_id=sheet.pk,document_id=document.pk,
+                issued_by_id=owner.pk,issued_on=date(2026,11,18),number=1)
+            self.assertFalse(staged.visible_to_students)
             MigrationExecutor(connection).migrate(target)
+            self.assertFalse(issues.get(pk=staged.pk).visible_to_students)
+            self.assertEqual(issues.get(pk=issue.pk).version,7)
+        finally:
+            cleanup=MigrationExecutor(connection)
+            cleanup.migrate(cleanup.loader.graph.leaf_nodes())
 
     def test_existing_issued_order_and_template_are_preserved(self):
         executor=MigrationExecutor(connection)
@@ -119,4 +135,5 @@ class WorksheetBlockMigrationTests(TransactionTestCase):
             MigrationExecutor(connection).migrate(target)
             self.assertEqual(list(WorksheetBlock.objects.order_by('pk').values_list('pk','worksheet_id','problem_id','position','include_in_journal')),blocks)
         finally:
-            MigrationExecutor(connection).migrate(target)
+            cleanup=MigrationExecutor(connection)
+            cleanup.migrate(cleanup.loader.graph.leaf_nodes())

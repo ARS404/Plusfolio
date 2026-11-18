@@ -1,12 +1,13 @@
 """Explicit, version-checked changes to a circle's existing assignment."""
+from collections import Counter,defaultdict
+from collections.abc import Mapping
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
-from collections import Counter,defaultdict
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from . import services as s
-from .models import Circle,Worksheet,WorksheetItem,WorksheetIssue
+from .models import Worksheet,WorksheetItem,WorksheetIssue
 
 
 def candidates(user,issue):
@@ -35,13 +36,34 @@ def options(user,circle,issue_id):
             'number':issue.number,'versions':rows}
 
 
-@transaction.atomic
-def update(user,circle,issue_id,data):
-    s.require(s.can_write(user,circle))
-    Circle.objects.select_for_update().get(pk=circle.pk)
+def lock_issue(user,circle,issue_id):
+    circle=s.lock_writable_circle(user,circle)
     issue=circle.issues.select_for_update(of=('self',)).select_related('worksheet__document','circle').filter(pk=issue_id).first()
     if not issue:raise s.NotFound('Выдача не найдена.')
-    if set(data)-{'version','worksheet_id','issued_on'}:raise ValidationError('Можно изменить версию листка и дату выдачи.')
+    return issue
+
+
+@transaction.atomic
+def publish(user,circle,issue_id,data):
+    issue=lock_issue(user,circle,issue_id)
+    if not isinstance(data,Mapping) or set(data)!={'version'} or type(data['version']) is not int:
+        raise ValidationError('Передайте версию выдачи.')
+    if issue.visible_to_students:
+        return issue
+    if data['version']!=issue.version:raise s.Conflict('Выдача уже изменена. Откройте её заново.')
+    if WorksheetIssue.objects.filter(pk=issue.pk,version=issue.version,visible_to_students=False).update(
+            visible_to_students=True,version=issue.version+1)!=1:
+        raise s.Conflict('Выдача уже изменена. Откройте её заново.')
+    s.assign_current_students(issue)
+    issue.visible_to_students=True;issue.version+=1
+    s.audit(user,'worksheet.issue.publish',{'issue':issue.pk,'version':issue.version},issue.circle)
+    return issue
+
+
+@transaction.atomic
+def update(user,circle,issue_id,data):
+    issue=lock_issue(user,circle,issue_id)
+    if not isinstance(data,Mapping) or set(data)-{'version','worksheet_id','issued_on'}:raise ValidationError('Можно изменить версию листка и дату выдачи.')
     if type(data.get('version')) is not int:raise ValidationError('Передайте версию выдачи.')
     if data['version']!=issue.version:raise s.Conflict('Выдача уже изменена. Откройте её заново.')
     target=data.get('worksheet_id',str(issue.worksheet_id))

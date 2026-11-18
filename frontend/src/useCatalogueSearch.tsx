@@ -2,24 +2,25 @@ import {useEffect,useState} from 'react';
 
 type Filters=Record<string,string|string[]>;
 export type CatalogueReply={kind:string;results:{entity:any;match:string;excerpt:string}[];semantic:boolean;pending:number;notice:string};
-export function useCatalogueSearch(kind:string|undefined,query:string,filters:Filters={}){
+export function useCatalogueSearch(kind:string|undefined,query:string,filters:Filters={},revision=0){
  const params=new URLSearchParams({kind:kind||'',q:query.trim(),limit:'100'});
  for(const [name,values] of Object.entries(filters))for(const value of Array.isArray(values)?values:[values])if(value)params.append(name,value);
- const key=kind&&query.trim()?params.toString():'';
+ const request=kind&&query.trim()?params.toString():'';
+ const key=request?revision+':'+request:'';
  const [result,setResult]=useState<{key:string;data:CatalogueReply|null;error:string}>({key:'',data:null,error:''});
  useEffect(()=>{
   if(!key)return;
   const abort=new AbortController();
   const timer=setTimeout(async()=>{
    try{
-    const response=await fetch('/api/catalogue-search?'+key,{credentials:'same-origin',signal:abort.signal});
+    const response=await fetch('/api/catalogue-search?'+request,{credentials:'same-origin',signal:abort.signal});
     const data=await response.json();
     if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:'Поиск временно недоступен.');
     if(!abort.signal.aborted)setResult({key,data,error:''});
    }catch(error:any){if(!abort.signal.aborted)setResult({key,data:null,error:error.message})}
   },500);
   return()=>{clearTimeout(timer);abort.abort()};
- },[key]);
+ },[key,request]);
  return {data:result.key===key?result.data:null,error:result.key===key?result.error:'',busy:!!key&&result.key!==key};
 }
 export function CatalogueSearchStatus({data,busy,error}:{data?:CatalogueReply|null;busy?:boolean;error?:string}){

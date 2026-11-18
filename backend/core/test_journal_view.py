@@ -1,6 +1,7 @@
 import csv,io
 from collections import Counter
 from datetime import timedelta
+from unittest.mock import patch
 from django.core.management import call_command
 from django.test import TestCase,override_settings
 from django.utils import timezone
@@ -89,6 +90,33 @@ class JournalViewTests(TestCase):
         self.assertEqual(response.status_code,200)
         rows=list(csv.reader(io.StringIO(response.content.decode('utf-8-sig')),delimiter='\t'))
         self.assertEqual(rows[1][1:],expected);self.assertEqual(len(rows),4)
+
+    def test_busy_export_rejects_before_loading_journal(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        with patch('core.journal_export.fcntl.flock',side_effect=BlockingIOError),CaptureQueriesContext(connection) as queries:
+            response=self.client_for().get(f'/api/circles/{self.circle.pk}/journal/export')
+        self.assertEqual(response.status_code,429)
+        self.assertIn('Retry-After',response)
+        self.assertFalse(any('FROM "core_solve"' in query['sql'] or 'FROM "core_assignment"' in query['sql'] for query in queries))
+
+    def test_xlsx_failure_removes_temporary_xml(self):
+        from openpyxl.worksheet._writer import ALL_TEMP_FILES
+        from .journal_export import columns,xlsx
+        data=self.journal()
+        previous=set(ALL_TEMP_FILES)
+        with patch('core.journal_export.Workbook.save',side_effect=OSError('test write failure')):
+            with self.assertRaises(OSError):xlsx(data,columns(data))
+        self.assertEqual(set(ALL_TEMP_FILES),previous)
+
+    def test_export_rejects_oversized_slice_before_loading_marks(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        with patch('core.journal_export.MAX_EXPORT_CELLS',1),CaptureQueriesContext(connection) as queries:
+            response=self.client_for().get(f'/api/circles/{self.circle.pk}/journal/export')
+        self.assertEqual(response.status_code,400)
+        self.assertFalse(any('FROM "core_solve"' in query['sql'] for query in queries))
+        self.assertFalse(any('FROM "core_assignment"' in query['sql'] for query in queries))
 
     def test_invalid_options_are_rejected_for_both_screen_and_export(self):
         for params in [{'hide_discussed':'true'},{'hide_discussed':'2'},{'order':'random'}]:

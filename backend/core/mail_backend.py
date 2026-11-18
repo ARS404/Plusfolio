@@ -31,11 +31,6 @@ def check_capacity(budget,count,*,outbox=False):
         raise DailyMailLimit()
 
 
-def check_invitation_capacity():
-    # The caller's invite transaction holds this lock until its outbox row exists.
-    check_capacity(locked_budget(),1)
-
-
 def reserve_mail(count,*,outbox=False):
     if not transaction.get_autocommit():
         raise RuntimeError('Отправляйте почту вне транзакции: через outbox или после commit.')

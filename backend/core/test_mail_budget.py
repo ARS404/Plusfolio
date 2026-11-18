@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import json
 from datetime import datetime, timedelta, timezone as utc
 from io import StringIO
 from unittest import skipUnless
@@ -8,12 +9,13 @@ from django.core.management import call_command, CommandError
 from django.db import connection, connections, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIClient
 from . import services as s
 from .mail_backend import DailyMailLimit, reserve_mail
 from .mail_delivery import deliver_batch
-from .models import Circle, EmailOutbox, Invitation, MailBudget, User
+from .models import AuditEvent, Circle, CircleTeacher, EmailOutbox, Invitation, MailBudget, Tag, User
 
 
 @override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.MD5PasswordHasher'],DEMO=False,
@@ -106,6 +108,39 @@ class MailBudgetTests(TransactionTestCase):
             'circle_ids':[str(self.circle.pk),str(other.pk)]},format='json')
         self.assertEqual(result.status_code,429)
         self.assertFalse(Invitation.objects.exists());self.assertFalse(EmailOutbox.objects.exists())
+
+    def test_batch_invitation_queries_do_not_grow_per_circle(self):
+        teacher=User.objects.create_user('teacher@example.test','unused',roles=['teacher'])
+        s.profiles(teacher)
+        circles=Circle.objects.bulk_create([Circle(name=f'Batch {index}',created_by=self.admin) for index in range(12)])
+        CircleTeacher.objects.bulk_create([CircleTeacher(circle=circle,teacher=teacher.teacher) for circle in circles])
+        tag=Tag.objects.create(kind='circle',name='Batch scope')
+        query_counts=[];created=[]
+        for selected in [circles[:1],circles[1:]]:
+            with CaptureQueriesContext(connection) as queries:
+                invitations=s.invite_many(teacher,'batch@example.test','student',[str(circle.pk) for circle in selected],[tag.pk])
+            query_counts.append(len(queries));created.extend(invitations)
+            self.assertEqual([invitation.circle_id for invitation in invitations],[circle.pk for circle in selected])
+        self.assertEqual(query_counts[0],query_counts[1])
+        self.assertEqual(len({invitation.number_id for invitation in created}),len(circles))
+        self.assertTrue(all(invitation.number_id is not None for invitation in created))
+        self.assertEqual(Invitation.tags.through.objects.filter(invitation__in=created,tag=tag).count(),len(circles))
+        self.assertEqual(EmailOutbox.objects.filter(invitation__in=created).count(),len(circles))
+        self.assertEqual(AuditEvent.objects.filter(actor=teacher,kind='invitation.create').count(),len(circles))
+
+    def test_revoke_preserves_acceptance_committed_after_its_read(self):
+        invitation=s.invite(self.admin,'accepted@example.test','teacher',self.circle)
+        token=json.loads(s.cipher().decrypt(invitation.letters.get().encrypted_payload.encode()))['token']
+        lookup=Invitation.objects.get
+        def accept_after_read(*args,**kwargs):
+            stale=lookup(*args,**kwargs)
+            s.accept_invitation(token,{'name':'Accepted teacher','password':'TestPassword2026!'})
+            return stale
+        client=APIClient();client.force_authenticate(self.admin)
+        with patch.object(Invitation.objects,'get',side_effect=accept_after_read):
+            response=client.delete(f'/api/invitations/{invitation.pk}')
+        self.assertEqual(response.status_code,200)
+        invitation.refresh_from_db();self.assertEqual(invitation.state,'accepted')
 
     def test_pending_invitation_reserves_capacity_against_other_outgoing_mail(self):
         self.budget.daily_limit=1;self.budget.save(update_fields=['daily_limit'])

@@ -44,6 +44,86 @@ class DomainTests(TestCase):
         self.assertLessEqual(result.data['solved_pairs'],result.data['assigned_pairs'])
     def test_student_cannot_read_foreign_circle(self):
         self.assertEqual(self.client_for(self.student).get(f'/api/circles/{self.foreign.pk}').status_code,404)
+    def test_circle_archive_and_restore_respect_permissions_and_keep_history(self):
+        path = f'/api/v1/circles/{self.circle.pk}'
+        teacher = self.client_for(self.teacher)
+        for user, prefix in ((self.student, '/api'), (self.analyst, '/api/v1')):
+            client = self.client_for(user)
+            readonly_path = f'{prefix}/circles/{self.circle.pk}'
+            self.assertFalse(client.get(readonly_path).data['can_manage_state'])
+            self.assertEqual(client.patch(readonly_path, {'archived': True}, format='json').status_code, 403)
+        self.assertEqual(teacher.patch(path, {'archived': 'true'}, format='json').status_code, 400)
+        self.assertEqual(teacher.patch(path, {'archived': True, 'name': 'Другое'}, format='json').status_code, 400)
+
+        before = Assignment.objects.filter(issue__circle=self.circle).count()
+        archived = teacher.patch(path, {'archived': True}, format='json')
+        self.assertEqual(archived.status_code, 200, archived.data)
+        self.assertTrue(archived.data['archived'])
+        self.assertTrue(archived.data['can_manage_state'])
+        self.assertFalse(archived.data['can_write'])
+        admin = self.client_for(self.admin)
+        self.assertFalse(admin.get(path).data['can_manage_teachers'])
+        self.assertEqual(teacher.patch(path, {'archived': True}, format='json').status_code, 200)
+
+        restore = admin.patch(path, {'archived': False}, format='json')
+        self.assertEqual(restore.status_code, 200, restore.data)
+        self.assertFalse(restore.data['archived'])
+        self.assertTrue(teacher.get(path).data['can_write'])
+        self.assertEqual(Assignment.objects.filter(issue__circle=self.circle).count(), before)
+        self.assertEqual(list(AuditEvent.objects.filter(circle=self.circle, kind__in=['circle.archive','circle.restore'])
+                              .order_by('pk').values_list('kind', flat=True)), ['circle.archive','circle.restore'])
+
+    def test_archived_circle_is_read_only_across_circle_endpoints(self):
+        invitation = s.invite(self.admin, 'archive-invite@example.test', 'teacher', self.circle)
+        token = self._invite_token(invitation)
+        s.set_circle_archived(self.admin, self.circle.pk, True)
+        client = self.client_for(self.admin)
+        path = f'/api/circles/{self.circle.pk}'
+        for suffix in ('', '/members', '/issues', '/journal', '/audit'):
+            with self.subTest(read=suffix):
+                self.assertEqual(client.get(path+suffix).status_code, 200)
+        self.assertFalse(client.get(path+'/journal').data['can_write'])
+        for method, suffix, body in [
+            ('patch','',{'description':'Редактирование архива'}),
+            ('post','/members',{'student_id':self.student.student.pk}),
+            ('delete','/members',{'email':self.student.email}),
+            ('patch',f'/members/{self.student.student.pk}',{'graduation_year':2031}),
+            ('post','/teachers',{'email':self.mentor.email}),
+            ('delete','/teachers',{'email':self.teacher.email}),
+            ('post','/issues',{'worksheet_id':str(self.issue.worksheet_id),'issued_on':timezone.localdate().isoformat()}),
+            ('patch',f'/issues/{self.issue.pk}',{'version':self.issue.version}),
+            ('post',f'/problems/{self.problem.pk}/solve',{'value':True,'version':0,'student_id':self.student.student.pk}),
+            ('post',f'/problems/{self.problem.pk}/discussion',{'value':True,'version':0}),
+            ('post',f'/problems/{self.problem.pk}/solution-visibility',{'value':True,'version':0}),
+        ]:
+            with self.subTest(method=method, suffix=suffix):
+                self.assertIn(getattr(client,method)(path+suffix,body,format='json').status_code, (400,403))
+        self.assertEqual(client.post('/api/invitations', {'email':'other-invite@example.test','role':'teacher',
+                         'circle_id':str(self.circle.pk)}, format='json').status_code,403)
+        self.assertEqual(self.client.post('/api/accept/'+token, {'name':'Учитель','password':'Synthetic-Password-1'},
+                         content_type='application/json').status_code,403)
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.state, 'pending')
+        self.assertFalse(User.objects.filter(email=invitation.email).exists())
+        # A request that already read the active circle must also recheck its state when writing.
+        with self.assertRaises(s.PermissionDenied):
+            s.assign_teacher(self.admin,self.circle,self.teacher.email,remove=True)
+
+    def test_circle_archive_filter_in_list_and_search_respects_access(self):
+        s.set_circle_archived(self.admin,self.circle.pk,True)
+        client = self.client_for(self.teacher)
+        archived = client.get('/api/circles', {'state':'archived'}).data
+        self.assertEqual({row['id'] for row in archived}, {str(self.circle.pk)})
+        active = client.get('/api/circles', {'state':'active'}).data
+        self.assertTrue(active)
+        self.assertTrue(all(not row['archived'] for row in active))
+        for state, expected in [('active', []), ('archived', [str(self.circle.pk)]), ('all', [str(self.circle.pk)])]:
+            with self.subTest(state=state):
+                result = client.get('/api/catalogue-search', {'kind':'circle','q':str(self.circle.pk),'state':state})
+                self.assertEqual(result.status_code,200,result.data)
+                self.assertEqual([hit['entity']['id'] for hit in result.data['results']], expected)
+        self.assertEqual(client.get('/api/circles', {'state':'unknown'}).status_code,400)
+
     def test_student_cannot_mark_or_create(self):
         client=self.client_for(self.student)
         self.assertEqual(client.post(f'/api/circles/{self.circle.pk}/problems/{self.problem.pk}/solve',{'value':True,'version':0,'student_id':self.student.student.pk},format='json').status_code,403)
@@ -99,7 +179,7 @@ class DomainTests(TestCase):
         s.assign_teacher(self.admin,self.circle,self.mentor.email,True)
         self.assertTrue(s.can_write(self.teacher,self.circle));self.assertFalse(s.can_write(self.mentor,self.circle))
     def test_duplicate_issue_rejected(self):
-        with self.assertRaises(ValidationError):s.issue_worksheet(self.teacher,self.circle,self.issue.worksheet_id,timezone.localdate())
+        with self.assertRaises(ValidationError):s.issue_worksheet(self.teacher,self.circle,self.issue.worksheet_id,timezone.localdate(),visible_to_students=True)
     def test_published_content_and_topics_protected(self):
         self.problem.title='Нельзя'
         with self.assertRaises(ValidationError):self.problem.save()
@@ -169,6 +249,42 @@ class DomainTests(TestCase):
         self.assertEqual(response.status_code,400)
         backup.refresh_from_db();self.assertIn('admin',backup.roles)
 
+    def test_role_change_keeps_credentials_and_name_committed_before_its_lock(self):
+        from django.contrib.auth.hashers import make_password
+        from unittest.mock import patch
+        from .people import normalize_name
+        password=make_password('ConcurrentPassword2026!');name='Новое имя преподавателя'
+        original_get=User.objects.get;original_lock=User.objects.select_for_update;changed=False
+        def change_credentials():
+            nonlocal changed
+            if not changed:
+                User.objects.filter(pk=self.teacher.pk).update(password=password,name=name,name_search=normalize_name(name))
+                changed=True
+        def stale_get(*args,**kwargs):
+            account=original_get(*args,**kwargs)
+            if account.pk==self.teacher.pk:change_credentials()
+            return account
+        def lock(*args,**kwargs):
+            change_credentials()
+            return original_lock(*args,**kwargs)
+        client=self.client_for(self.admin)
+        with patch.object(User.objects,'get',side_effect=stale_get),patch.object(User.objects,'select_for_update',side_effect=lock):
+            response=client.patch('/api/users',{'id':self.teacher.pk,'roles':['teacher','analyst']},format='json')
+        self.assertEqual(response.status_code,200,response.data)
+        self.teacher.refresh_from_db()
+        self.assertEqual(self.teacher.password,password);self.assertTrue(self.teacher.check_password('ConcurrentPassword2026!'))
+        self.assertEqual(self.teacher.name,name);self.assertEqual(self.teacher.name_search,normalize_name(name))
+        self.assertEqual(self.teacher.roles,['analyst','teacher'])
+
+    def test_role_changes_reject_non_object_payloads_and_non_list_roles(self):
+        client=self.client_for(self.admin)
+        payloads=[[],{'id':self.teacher.pk,'roles':'teacher'},{'id':self.teacher.pk,'roles':{'admin':True}},
+                  {'id':self.teacher.pk,'roles':[{'admin':True}]}]
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                self.assertEqual(client.patch('/api/users',payload,format='json').status_code,400)
+        self.teacher.refresh_from_db();self.assertEqual(self.teacher.roles,['teacher'])
+
     def test_teacher_cannot_administer_roles(self):
         self.assertEqual(self.client_for(self.teacher).patch('/api/users',{'id':self.student.pk,'roles':['admin']},format='json').status_code,403)
     def test_solution_not_in_student_material_responses(self):
@@ -183,6 +299,16 @@ class DomainTests(TestCase):
         self.assertFalse(s.invitation_allowed(self.multi,'teacher',self.other))
         self.assertTrue(s.invitation_allowed(self.multi,'student',self.other))
         self.assertTrue(s.invitation_allowed(self.multi,'teacher',self.circle))
+        client=self.client_for(self.multi)
+        for role,visible in [('student',True),('teacher',False)]:
+            circles=client.get('/api/circles',{'invite_role':role})
+            self.assertEqual(circles.status_code,200)
+            self.assertEqual(str(self.other.pk) in {row['id'] for row in circles.data},visible)
+            result=client.get('/api/catalogue-search',{'kind':'circle','q':f'C-{self.other.number_id}','invite_role':role})
+            self.assertEqual(result.status_code,200)
+            self.assertEqual(bool(result.data['results']),visible)
+        self.assertEqual(client.get('/api/circles',{'invite_role':'admin'}).status_code,400)
+        self.assertEqual(client.get('/api/catalogue-search',{'kind':'circle','q':'кружок','invite_role':'admin'}).status_code,400)
     def test_analyst_cannot_remove_teacher(self):
         with self.assertRaises(s.PermissionDenied):s.assign_teacher(self.analyst,self.circle,self.teacher.email,True)
     def test_personal_analytics_survives_all_departures(self):
@@ -308,7 +434,7 @@ class DomainTests(TestCase):
 
     def test_multiple_selected_worksheets_exclude_unselected_third(self):
         extra=Worksheet.objects.exclude(pk__in=self.circle.issues.values('worksheet_id')).first()
-        s.issue_worksheet(self.teacher,self.circle,extra.pk,timezone.localdate())
+        s.issue_worksheet(self.teacher,self.circle,extra.pk,timezone.localdate(),visible_to_students=True)
         chosen=list(self.circle.issues.exclude(worksheet=extra).values_list('pk',flat=True))
         response=self.client_for(self.teacher).get(f'/api/circles/{self.circle.pk}/journal',{'issues':','.join(map(str,chosen))})
         self.assertEqual({block['issue_id'] for block in response.data['blocks']},set(chosen))
@@ -503,7 +629,7 @@ class DomainTests(TestCase):
         topic=Topic.objects.filter(parent__isnull=False,is_other=False,archived=False).first()
         problems=[s.create_material(self.teacher,'problem',{'title':'Фильтр задача '+str(i),'statement':'Условие','solution':'Скрытое решение','topics':[str(topic.pk)],'tags':ids}) for i,ids in enumerate([[pt[0].pk,pt[1].pk],[pt[1].pk],[pt[0].pk]])]
         sheets=[s.create_material(self.teacher,'worksheet',{'title':'Фильтр листок '+str(i),'topics':[str(topic.pk)],'tags':[wt[i].pk],'problems':[str(p.pk) for p in subset]}) for i,subset in enumerate([[problems[0],problems[1]],[problems[0],problems[2]]])]
-        for sheet in sheets:s.issue_worksheet(self.teacher,self.circle,sheet.pk,timezone.localdate())
+        for sheet in sheets:s.issue_worksheet(self.teacher,self.circle,sheet.pk,timezone.localdate(),visible_to_students=True)
         return pt,wt,problems,sheets,topic
 
     def test_circle_city_filter_respects_available_circles(self):
@@ -610,8 +736,8 @@ class DomainTests(TestCase):
         sheets=[]
         for i,subset in enumerate([[problems[0],problems[1]],[problems[0],problems[2]]]):
             sheet=s.create_material(self.teacher,'worksheet',{'title':'Листок отчёта '+str(i),'topics':[str(branch.pk)],'tags':[wt.pk],'problems':[str(p.pk) for p in subset]})
-            sheets.append(sheet);s.issue_worksheet(self.teacher,circles[0],sheet.pk,timezone.localdate())
-        s.issue_worksheet(self.teacher,circles[1],sheets[0].pk,timezone.localdate())
+            sheets.append(sheet);s.issue_worksheet(self.teacher,circles[0],sheet.pk,timezone.localdate(),visible_to_students=True)
+        s.issue_worksheet(self.teacher,circles[1],sheets[0].pk,timezone.localdate(),visible_to_students=True)
         for account,problem in [(self.student,problems[0]),(self.student,problems[1]),(peer,problems[0])]:
             s.mark(self.teacher,circles[0],problem.pk,{'student_id':account.student.pk,'value':True,'version':0})
         for circle,problem in [(circles[0],problems[0]),(circles[0],problems[1]),(circles[1],problems[0]),(circles[1],problems[1])]:
@@ -880,14 +1006,15 @@ class DomainTests(TestCase):
         result=client.get('/api/analytics',params).data
         self.assertEqual(result['assigned_pairs'],3);self.assertEqual(result['student_count'],1)
 
-    def test_batch_worksheet_issue_deduplicates_and_assigns_every_selected_sheet(self):
+    def test_batch_worksheet_issue_deduplicates_and_stages_every_selected_sheet(self):
         pt,wt,problems,sheets,topic=self._filter_fixture()
         circle=Circle.objects.create(name='Пакетная выдача',created_by=self.admin)
         s.assign_teacher(self.admin,circle,self.teacher.email);s.enroll(self.teacher,circle,self.student.email)
         response=self.client_for(self.teacher).post(f'/api/circles/{circle.pk}/issues',{'worksheet_ids':[str(sheets[0].pk),str(sheets[1].pk),str(sheets[0].pk)],'issued_on':timezone.localdate().isoformat()},format='json')
         self.assertEqual(response.status_code,200)
         self.assertEqual(circle.issues.count(),2)
-        self.assertEqual(Assignment.objects.filter(issue__circle=circle,student=self.student.student).count(),2)
+        self.assertTrue(all(not issue['visible_to_students'] for issue in response.data))
+        self.assertFalse(Assignment.objects.filter(issue__circle=circle).exists())
 
     def test_batch_worksheet_issue_rolls_back_all_sheets_assignments_and_audit(self):
         pt,wt,problems,sheets,topic=self._filter_fixture()
@@ -1079,7 +1206,7 @@ class DomainTests(TestCase):
         self.assertEqual(numbers,list(range(1,len(numbers)+1)))
         before={issue.pk:issue.number for issue in self.circle.issues.all()}
         extra=s.create_material(self.teacher,'worksheet',{'title':'Новая выдача задним числом','topics':[str(topic.pk)],'tags':[],'problems':[str(problems[0].pk)]})
-        issue=s.issue_worksheet(self.teacher,self.circle,extra.pk,timezone.localdate()-timedelta(days=20))
+        issue=s.issue_worksheet(self.teacher,self.circle,extra.pk,timezone.localdate()-timedelta(days=20),visible_to_students=True)
         self.assertEqual(issue.number,len(numbers)+1)
         self.assertEqual({issue.pk:issue.number for issue in self.circle.issues.filter(pk__in=before)},before)
 

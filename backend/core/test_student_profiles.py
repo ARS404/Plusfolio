@@ -32,7 +32,7 @@ class StudentProfileTests(TestCase):
             sheet=Worksheet.objects.create(document=document,author=cls.teacher,title=circle.name,published=True)
             WorksheetItem.objects.bulk_create([WorksheetItem(worksheet=sheet,problem=cls.tasks[i],position=n+1,include_in_journal=i!=2) for n,i in enumerate(indexes)])
             document.current_revision=sheet;document.public_revision=sheet;document.save()
-            issued=WorksheetIssue.objects.create(circle=circle,worksheet=sheet,document=document,issued_by=cls.teacher,issued_on=timezone.localdate(),number=1)
+            issued=WorksheetIssue.objects.create(visible_to_students=True,circle=circle,worksheet=sheet,document=document,issued_by=cls.teacher,issued_on=timezone.localdate(),number=1)
             Assignment.objects.bulk_create([Assignment(issue=issued,student=user.student) for user in recipients]);return issued
         cls.issue=issue(cls.circle,[0,1,2],[cls.pupil,cls.peer])
         cls.private_issue=issue(cls.secret,[0,3],[cls.pupil,cls.foreign,cls.dual])
@@ -128,6 +128,31 @@ class StudentProfileTests(TestCase):
         self.assertEqual((data['assigned_pairs'],data['solved_pairs']),(2,1))
         self.assertEqual(self.get(self.dual,self.path('/analytics'),{'circle':str(self.secret.pk)}).status_code,404)
 
+    def test_circle_state_filters_group_individual_and_personal_analytics(self):
+        s.set_circle_archived(self.admin, self.secret.pk, True)
+        Enrollment.objects.filter(circle=self.secret, student=self.pupil.student).update(left_at=timezone.now())
+        cases = [
+            (self.admin, '/api/analytics', {'active':4, 'archived':6, 'all':9}),
+            (self.admin, self.path('/analytics'), {'active':2, 'archived':2, 'all':3}),
+            (self.pupil, '/api/analytics', {'active':2, 'archived':2, 'all':3}),
+        ]
+        for user, path, expected in cases:
+            self.assertEqual(self.get(user,path).data['assigned_pairs'],expected['all'])
+            for state, total in expected.items():
+                with self.subTest(user=user.name, path=path, state=state):
+                    result = self.get(user,path,{'state':state})
+                    self.assertEqual(result.status_code,200,result.data)
+                    self.assertEqual(result.data['assigned_pairs'],total)
+                    if state != 'all':
+                        self.assertTrue(all(row['archived']==(state=='archived') for row in result.data['circle_rows']))
+            self.assertEqual(self.get(user,path,{'state':'unknown'}).status_code,400)
+        empty_teacher_report = self.get(self.teacher,'/api/analytics',{'state':'archived'}).data
+        self.assertEqual(empty_teacher_report['assigned_pairs'],0)
+        self.assertFalse(empty_teacher_report['personal_only'])
+        self.assertEqual(self.get(self.teacher,'/api/analytics',{'state':'active','circle':str(self.secret.pk)}).status_code,404)
+        self.assertEqual(self.get(self.admin,'/api/analytics',{'state':'archived','circle':str(self.circle.pk)}).data['assigned_pairs'],0)
+        self.assertEqual(self.get(self.admin,'/api/analytics',{'state':'archived','city':'Москва'}).data['assigned_pairs'],0)
+
     def test_former_members_and_archived_circles_keep_history_and_empty_reports(self):
         Enrollment.objects.filter(circle=self.circle,student=self.pupil.student).update(left_at=timezone.now())
         Circle.objects.filter(pk=self.circle.pk).update(archived=True)
@@ -181,11 +206,12 @@ class StudentProfileTests(TestCase):
 
     def test_journal_people_do_not_load_account_secrets_or_deferred_fields_per_row(self):
         from .journal import snapshot,select_issues
-        selected=select_issues(self.circle,for_export=True)
+        selected=select_issues(self.circle.issues.all(),for_export=True)
         with CaptureQueriesContext(connection) as queries:
-            data=snapshot(self.teacher,self.circle,selected,lambda task,user:{'id':str(task.pk),'title':task.title})
+            data=snapshot(self.teacher,self.circle,selected,lambda task,user:{'id':str(task.pk),'title':task.title},export_options={})
+            data['solves']=list(data['solves'])
         people=[query['sql'] for query in queries if 'FROM "core_enrollment"' in query['sql']]
-        self.assertEqual(len(queries),5)
+        self.assertEqual(len(queries),4)
         self.assertEqual(len(people),1)
         for field in ['password','email','roles','first_name','last_name']:
             self.assertNotIn('"core_user"."'+field+'"',people[0])
