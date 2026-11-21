@@ -26,7 +26,7 @@ def catalogue_search(request):
     if count>60:raise Throttled(wait=60,detail='Слишком много поисков. Повторите через минуту.')
     if kind=='circle':
         if scope!='available':raise ValidationError('Для кружков scope=available.')
-        rows=f.by_city(s.circles_for(request.user),f.query_values(params,'city'))
+        rows=f.by_city(s.circles_for(request.user,role=params.get('role')),f.query_values(params,'city'))
         rows=f.by_tags(rows,f.query_values(params,'tag'),'circle')
         rows=f.by_circle_state(rows, params.get('state','all'))
         if params.get('invite_role'):

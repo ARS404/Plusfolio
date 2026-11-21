@@ -116,7 +116,7 @@ def circles(request):
             circle=Circle.objects.create(name=name,description=d.get('description',''),city=d.get('city',''),region=d.get('region',''),created_by=request.user)
             circle.tags.set(tags);s.audit(request.user,'circle.create',{'circle':str(circle.pk)},circle)
         return Response(circle_data(circle,request.user),status=201)
-    selected = f.by_circle_state(s.circles_for(request.user), request.query_params.get('state','all'))
+    selected = f.by_circle_state(s.circles_for(request.user,role=request.query_params.get('role')), request.query_params.get('state','all'))
     if request.query_params.get('invite_role'):
         selected=selected.filter(pk__in=s.invitation_circles_for(request.user,request.query_params['invite_role']))
     selected = f.by_city(selected, f.query_values(request.query_params,'city'))

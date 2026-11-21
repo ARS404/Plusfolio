@@ -1,0 +1,12 @@
+.journal-viewport .journal-scroll{max-height:75vh;max-height:75dvh;isolation:isolate;overscroll-behavior:contain}
+.journal-viewport .journal-table thead{position:sticky;top:0;z-index:3}
+.journal-viewport .journal-table thead .student-col{z-index:4}
+.journal-viewport-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:12px}
+.journal-intro .journal-viewport-actions>.save-status{margin-top:0}
+.journal-viewport.is-expanded{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;padding:18px 22px;background:var(--paper);height:100vh;height:100dvh}
+.journal-viewport.is-expanded .journal-intro{flex:0 0 auto;flex-direction:row;flex-wrap:wrap;gap:12px;padding:0 0 14px}
+.journal-viewport.is-expanded .journal-intro>div:first-child{flex:1;min-width:150px}
+.journal-viewport.is-expanded .journal-scroll{flex:1;min-height:0;max-height:none;max-width:100%;width:100%}
+.journal-viewport.is-expanded .journal-legend{flex-shrink:0;padding:12px 0 0}
+.journal-viewport.is-expanded .theory-journal-sheets{display:none}
+@media(max-width:600px){.journal-viewport.is-expanded{padding:12px}.journal-viewport-actions{gap:8px}.journal-viewport.is-expanded .journal-viewport-actions{justify-content:flex-start}.journal-viewport.is-expanded .journal-legend{gap:12px;font-size:8px}}

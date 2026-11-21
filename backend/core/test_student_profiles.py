@@ -108,6 +108,61 @@ class StudentProfileTests(TestCase):
                 self.assertEqual(result.data['student_count'],expected_count)
                 self.assertNotIn('subject_student_id',result.data)
 
+    def combined_role_account(self):
+        user=self.pupil
+        user.roles=['admin','teacher','analyst','student'];user.save(update_fields=['roles']);s.profiles(user)
+        CircleTeacher.objects.create(circle=self.circle,teacher=user.teacher)
+        tag=Tag.objects.create(name='Отдельная область аналитика',kind='circle');self.secret.tags.add(tag)
+        AnalystGrant.objects.create(user=user,tag=tag)
+        return user
+
+    def test_selected_role_scopes_reports_circle_choices_and_search_independently(self):
+        user=self.combined_role_account()
+        cases=[('admin',9,{self.circle.pk,self.secret.pk}),('teacher',4,{self.circle.pk}),
+               ('analyst',6,{self.secret.pk}),('student',3,{self.circle.pk,self.secret.pk})]
+        for role,assigned,circles in cases:
+            with self.subTest(role=role):
+                data=self.get(user,'/api/v1/analytics',{'role':role}).data
+                self.assertEqual(data['assigned_pairs'],assigned)
+                self.assertEqual(data['personal_only'],role=='student')
+                self.assertEqual({row['id'] for row in data['circle_rows']},set() if role=='student' else {str(pk) for pk in circles})
+                if role=='student':
+                    self.assertEqual(data['student_count'],1);self.assertEqual(data['student_rows'],[])
+                    self.assertIsNone(data['discussion']);self.assertEqual(data['distribution'],[])
+                choices=self.get(user,'/api/v1/circles',{'role':role})
+                self.assertEqual({row['id'] for row in choices.data},{str(pk) for pk in circles})
+                for circle in [self.circle,self.secret]:
+                    found=self.get(user,'/api/v1/catalogue-search',{'kind':'circle','q':f'C-{circle.number_id}','role':role}).data
+                    self.assertEqual([hit['entity']['id'] for hit in found['results']],[str(circle.pk)] if circle.pk in circles else [])
+        user.refresh_from_db()
+        self.assertEqual(set(user.roles),{'admin','teacher','analyst','student'})
+        self.assertEqual(self.get(user,'/api/analytics').data['assigned_pairs'],9)
+
+    def test_selected_role_cannot_be_forged_or_bypassed_by_circle_filters(self):
+        for prefix in ['/api','/api/v1']:
+            for path,params in [('/analytics',{}),('/circles',{}),('/catalogue-search',{'kind':'circle','q':'C-1'})]:
+                for role,status in [('admin',403),('unknown',400),('',400)]:
+                    with self.subTest(prefix=prefix,path=path,role=role):
+                        self.assertEqual(self.get(self.teacher,prefix+path,{**params,'role':role}).status_code,status)
+        user=self.combined_role_account()
+        for params in [{'circle':str(self.secret.pk)},{'circle':[str(self.circle.pk),str(self.secret.pk)],'city':'Москва'}]:
+            self.assertEqual(self.get(user,'/api/analytics',{'role':'teacher',**params}).status_code,404)
+        self.assertEqual(self.get(user,'/api/analytics',{'role':'teacher','city':'Тула'}).data['assigned_pairs'],0)
+        report=self.get(user,'/api/analytics',{'role':'teacher','include_discussed':'0'}).data
+        self.assertEqual((report['assigned_pairs'],report['solved_pairs']),(2,1))
+
+    def test_selected_role_uses_current_grants_and_preserves_personal_history(self):
+        user=self.combined_role_account()
+        CircleTeacher.objects.filter(teacher=user.teacher).update(ended_at=timezone.now())
+        AnalystGrant.objects.filter(user=user).delete()
+        for role in ['teacher','analyst']:
+            data=self.get(user,'/api/analytics',{'role':role}).data
+            self.assertEqual(data['assigned_pairs'],0);self.assertFalse(data['personal_only'])
+            self.assertEqual(self.get(user,'/api/circles',{'role':role}).data,[])
+        Enrollment.objects.filter(student=user.student,circle=self.secret).update(left_at=timezone.now())
+        self.assertEqual(self.get(user,'/api/analytics',{'role':'student'}).data['assigned_pairs'],3)
+        self.assertEqual(self.get(user,'/api/analytics',{'role':'admin'}).data['assigned_pairs'],9)
+
     def test_report_links_only_profiles_available_in_the_adult_scope(self):
         own_id = self.dual.student.pk
         report = self.get(self.dual, '/api/analytics').data

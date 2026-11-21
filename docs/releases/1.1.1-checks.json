@@ -1,0 +1,105 @@
+{
+  "version": "1.1.1",
+  "date": "2026-11-21",
+  "previous_tag": "v1.1.0",
+  "scope": "Local release checks with synthetic data; no live server update or paid cloud jobs.",
+  "backend": {
+    "suite": "core",
+    "database": "isolated SQLite",
+    "total": 415,
+    "passed": 411,
+    "skipped": 4,
+    "seconds": 217.001,
+    "skip_reason": "PostgreSQL-only checks"
+  },
+  "frontend": {
+    "passed": 51,
+    "production_build": "passed"
+  },
+  "deployment_helpers": {
+    "passed": 54,
+    "scope": "Mocked Docker and S3; SDK versions taken from requirements-server.lock"
+  },
+  "database": {
+    "previous_tag": "v1.1.0",
+    "new_migrations": [],
+    "latest_core_migration": "0020_issue_visibility",
+    "schema_drift": "none",
+    "fresh_initialization": "passed",
+    "upgrade_copy": "passed",
+    "repeat_migration": "no operations",
+    "data_preserved": true,
+    "platform": "SQLite; synthetic demo copy only; live database unchanged",
+    "preservation_checked_tables": [
+      "core_circle",
+      "core_circleteacher",
+      "core_enrollment",
+      "core_student",
+      "core_problem",
+      "core_worksheet",
+      "core_worksheetdocument",
+      "core_worksheetissue",
+      "core_worksheetitem",
+      "core_worksheetblock",
+      "core_assignment",
+      "core_solve",
+      "core_discussion",
+      "core_imageasset",
+      "django_migrations"
+    ]
+  },
+  "tex_package": {
+    "contract_id": "4449050ac947b0bbc539a21a04949091abbcce064177ca335d41da37cc62623e",
+    "manifest_file_count": 486,
+    "all_archived_hashes_verified": true,
+    "offline_prepare_runs": 2,
+    "manifest_unchanged": true,
+    "service_cache_contract_unchanged": true,
+    "toolchain_inputs_changed_from_v1_1_0": [
+      "docs/tex-preflight.md"
+    ],
+    "compiler": "0.17.0",
+    "platform": "macOS arm64; Windows/WSL not executed"
+  },
+  "compatibility": {
+    "dependency_changes": false,
+    "models_or_migrations_changed": false
+  },
+  "ui": {
+    "scope": "In-app browser; desktop, narrow portrait and landscape viewports",
+    "verified": [
+      "Role selection scopes reports and circle choices",
+      "Sticky two-row header and pupil column during two-axis scrolling",
+      "Fullscreen entry and exit by button/Escape",
+      "Keyboard focus containment",
+      "Problem/PDF overlays above the expanded table",
+      "Background scroll and inert restored on exit/navigation"
+    ]
+  },
+  "documentation": {
+    "audiences": [
+      "human",
+      "robot"
+    ],
+    "roles": [
+      "student",
+      "teacher",
+      "analyst",
+      "admin"
+    ],
+    "openapi": "covered by core regression suite",
+    "windows_wsl": "Instructions included; real Windows acceptance not performed"
+  },
+  "github": {
+    "repository_visibility": "public",
+    "image_publishing_workflow": "disabled_manually",
+    "server_verification_workflow": "standard ubuntu-24.04 runner; not run locally",
+    "ready_made_oci_images_published": false
+  },
+  "limits": [
+    "Docker daemon unavailable; native PostgreSQL and Linux/container update/restore integration were not executed.",
+    "Data preservation was checked on a separate SQLite demo copy; this is not production PostgreSQL acceptance.",
+    "The WSL recipe was not executed on a Windows machine.",
+    "GitHub Actions status is separate from the local validation results."
+  ]
+}

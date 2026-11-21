@@ -16,10 +16,12 @@ def percent(numerator, denominator):
 
 
 def scoped_assignments(user, params, *, student=None):
-    group_circles = s.group_circles_for(user)
+    role = params.get('role')
+    roles = s.reporting_roles(user, role)
+    group_circles = s.group_circles_for(user, role=role)
     selected_circles = f.uuid_ids(f.query_values(params, 'circle'))
     if selected_circles is not None:
-        readable = group_circles if student is not None else s.circles_for(user)
+        readable = group_circles if student is not None else s.circles_for(user, role=role)
         found = readable.filter(pk__in=selected_circles).order_by().values_list('pk', flat=True)
         if {str(pk) for pk in found} != selected_circles:
             raise s.NotFound('Кружок недоступен.')
@@ -29,7 +31,7 @@ def scoped_assignments(user, params, *, student=None):
     group_circles = f.by_circle_state(f.by_city(group_circles, cities), state)
     group_ids = set(group_circles.order_by().values_list('pk', flat=True))
     allowed = Q(issue__circle_id__in=group_ids)
-    include_personal = student is None and 'student' in user.roles and not s.admin(user)
+    include_personal = student is None and 'student' in roles and 'admin' not in roles
     if include_personal:
         personal = Q(student__user=user)
         if selected_circles is not None:
@@ -263,7 +265,8 @@ def report(user, params, *, student=None):
         discussion = {'total': denominator, 'discussed': discussed, 'remaining': denominator-discussed,
                       'visible': visible, 'percent': percent(discussed, denominator)}
 
-    personal_only = student is None and 'student' in user.roles and not s.admin(user) and not group_ids
+    roles = s.reporting_roles(user, params.get('role'))
+    personal_only = student is None and 'student' in roles and 'admin' not in roles and not group_ids
     return {
         **({'subject_student_id':student.pk} if student is not None else {}),
         'include_discussed':include_discussed,'personal_only':personal_only, 'assigned_pairs': assigned_count, 'solved_pairs': solved_count,

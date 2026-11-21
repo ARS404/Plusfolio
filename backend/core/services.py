@@ -13,7 +13,7 @@ from rest_framework.exceptions import PermissionDenied, NotFound
 from .models import (
     AnalystGrant, Assignment, AuditEvent, Circle, CircleTeacher, Discussion,
     EmailOutbox, Enrollment, Invitation, Problem, Solve, Student, Tag, Teacher,
-    Topic, TopicCatalogVersion, User, Worksheet, WorksheetDocument,
+    ROLES, Topic, TopicCatalogVersion, User, Worksheet, WorksheetDocument,
     WorksheetIssue, WorksheetItem,
 )
 
@@ -27,22 +27,29 @@ def profiles(user):
     if 'teacher' in user.roles: Teacher.objects.get_or_create(user=user)
 def audit(user,kind,payload=None,circle=None):
     AuditEvent.objects.create(actor=user,kind=kind,payload=payload or {},circle=circle)
-def circles_for(user):
-    if admin(user): return Circle.objects.all()
+def reporting_roles(user,role=None):
+    if role is None:return user.roles
+    if role not in ROLES:raise ValidationError('role: выберите допустимую роль.')
+    require(role in user.roles,'У аккаунта нет выбранной роли.')
+    return [role]
+def circles_for(user,*,role=None):
+    roles=reporting_roles(user,role)
+    if 'admin' in roles: return Circle.objects.all()
     q=Q(pk__in=[])
-    if 'teacher' in user.roles:q|=Q(Exists(CircleTeacher.objects.filter(circle_id=OuterRef('pk'),teacher__user=user,ended_at=None)))
-    if 'student' in user.roles:q|=Q(Exists(Enrollment.objects.filter(circle_id=OuterRef('pk'),student__user=user,left_at=None)))
-    if 'analyst' in user.roles:q|=Q(Exists(Circle.tags.through.objects.filter(circle_id=OuterRef('pk'),tag_id__in=AnalystGrant.objects.filter(user=user).values('tag_id'))))
+    if 'teacher' in roles:q|=Q(Exists(CircleTeacher.objects.filter(circle_id=OuterRef('pk'),teacher__user=user,ended_at=None)))
+    if 'student' in roles:q|=Q(Exists(Enrollment.objects.filter(circle_id=OuterRef('pk'),student__user=user,left_at=None)))
+    if 'analyst' in roles:q|=Q(Exists(Circle.tags.through.objects.filter(circle_id=OuterRef('pk'),tag_id__in=AnalystGrant.objects.filter(user=user).values('tag_id'))))
     return Circle.objects.filter(q)
 def analyst_circles_for(user):
     if 'analyst' not in user.roles: return Circle.objects.none()
     return Circle.objects.filter(Exists(Circle.tags.through.objects.filter(circle_id=OuterRef('pk'),tag_id__in=AnalystGrant.objects.filter(user=user).values('tag_id'))))
-def group_circles_for(user):
+def group_circles_for(user,*,role=None):
     """Adult reporting scope, without circles accessible only as a pupil."""
-    if admin(user):return Circle.objects.all()
+    roles=reporting_roles(user,role)
+    if 'admin' in roles:return Circle.objects.all()
     q=Q(pk__in=[])
-    if 'teacher' in user.roles:q|=Q(Exists(CircleTeacher.objects.filter(circle_id=OuterRef('pk'),teacher__user=user,ended_at=None)))
-    if 'analyst' in user.roles:q|=Q(pk__in=analyst_circles_for(user))
+    if 'teacher' in roles:q|=Q(Exists(CircleTeacher.objects.filter(circle_id=OuterRef('pk'),teacher__user=user,ended_at=None)))
+    if 'analyst' in roles:q|=Q(pk__in=analyst_circles_for(user))
     return Circle.objects.filter(q)
 def get_circle(user,pk,write=False,*,lock=False):
     circles = circles_for(user)

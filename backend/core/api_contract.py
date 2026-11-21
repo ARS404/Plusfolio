@@ -2,7 +2,7 @@
 import re
 from .search_contract import SEARCH_BODY, SEARCH_PARAMETERS, SEARCH_DESCRIPTION, SEARCH_EXAMPLE, SEARCH_RESPONSE_EXAMPLE
 
-from .catalogue_search_contract import PARAMETERS as CATALOGUE_PARAMETERS, DESCRIPTION as CATALOGUE_DESCRIPTION, CIRCLE_STATE, INVITE_ROLE
+from .catalogue_search_contract import PARAMETERS as CATALOGUE_PARAMETERS, DESCRIPTION as CATALOGUE_DESCRIPTION, CIRCLE_STATE, INVITE_ROLE, REPORT_ROLE
 
 STRING = {'type': 'string'}
 UUID = {'type': 'string', 'format': 'uuid'}
@@ -58,7 +58,8 @@ def operation(id, summary, access='all', *, body=None, example=None, parameters=
 
 # Django converters and view argument names are part of the same registry as the schema.
 CIRCLE_STATE_PARAM = query('state',CIRCLE_STATE['description'],schema=CIRCLE_STATE)
-ANALYTICS_PARAMETERS = [query('circle','UUID кружка.',multiple=True,schema=UUID),CIRCLE_STATE_PARAM,CITY,TOPIC,query('problem_tag','Числовой ID тега задач.',multiple=True,schema=INT),query('worksheet_tag','Числовой ID тега листков.',multiple=True,schema=INT),query('include_discussed','1 — учитывать разобранные задачи (по умолчанию); 0 — исключать их в контексте выдачи. Общая пара остаётся, если задача ещё не разобрана хотя бы в одном выбранном кружке получателя.',schema={'enum':['0','1'],'default':'1'})]
+REPORT_ROLE_PARAM = query('role',REPORT_ROLE['description'],schema=REPORT_ROLE)
+ANALYTICS_PARAMETERS = [REPORT_ROLE_PARAM,query('circle','UUID кружка.',multiple=True,schema=UUID),CIRCLE_STATE_PARAM,CITY,TOPIC,query('problem_tag','Числовой ID тега задач.',multiple=True,schema=INT),query('worksheet_tag','Числовой ID тега листков.',multiple=True,schema=INT),query('include_discussed','1 — учитывать разобранные задачи (по умолчанию); 0 — исключать их в контексте выдачи. Общая пара остаётся, если задача ещё не разобрана хотя бы в одном выбранном кружке получателя.',schema={'enum':['0','1'],'default':'1'})]
 
 
 ROUTES = [
@@ -89,7 +90,7 @@ ROUTES = [
  ('account/password', 'api.account_password', {'POST': operation('passwordChange', 'Сменить собственный пароль', body=obj({'current_password': STRING, 'new_password': STRING, 'confirm_password': STRING}, ['current_password','new_password','confirm_password']),
     description='Новый пароль от 12 символов. После смены все прежние API-токены становятся недействительными.')}),
  ('circles', 'api.circles', {
-    'GET': operation('circleList', 'Доступные кружки', parameters=[Q,CITY,CIRCLE_STATE_PARAM,query('invite_role',INVITE_ROLE['description'],schema=INVITE_ROLE)]),
+    'GET': operation('circleList', 'Доступные кружки', parameters=[Q,CITY,CIRCLE_STATE_PARAM,REPORT_ROLE_PARAM,query('invite_role',INVITE_ROLE['description'],schema=INVITE_ROLE)]),
     'POST': operation('circleCreate', 'Создать кружок', 'admin', body=obj({'name': STRING, 'city': STRING, 'region': STRING, 'description': STRING, 'tags': ARRAY_INT}, ['name']),
         example={'name':'Математический кружок','city':'Москва','region':'Москва','description':'7–8 классы','tags':[]}, status=201)}),
  ('circles/<uuid:pk>', 'api.circle_detail', {
@@ -159,7 +160,7 @@ ROUTES = [
     'GET': operation('tagList', 'Теги всех трёх справочников',parameters=[Q]),
     'POST': operation('tagCreate', 'Создать тег', 'admin',body=obj({'kind':{'enum':['problem','worksheet','circle']},'name':STRING},['kind','name']),example={'kind':'worksheet','name':'Домашняя работа'},status=201)}),
  ('analytics', 'api.analytics', {'GET': operation('analyticsGet', 'Личный или групповой отчёт в пределах доступа',parameters=ANALYTICS_PARAMETERS,
-    description='Текущее состояние уникальных пар школьник × задача. Для student — только личные данные, если другие роли не дают более широкого доступа.')}),
+    description='Текущее состояние уникальных пар школьник × задача. role ограничивает отчёт выбранной назначенной ролью: admin — все кружки, teacher — текущее преподавание, analyst — теги доступа, student — только личные назначения. Без role сохраняется объединение прав аккаунта.')}),
  ('invitations', 'api.invitations', {
     'GET': operation('invitationList', 'Мои приглашения; у администратора — все', 'inviter',parameters=[Q]),
     'POST': operation('invitationCreate', 'Создать приглашения по email', 'inviter',body=obj({'email':{'type':'string','format':'email'},'role':{'enum':['student','teacher','analyst','admin']},'circle_ids':ARRAY_UUID,'tags':ARRAY_INT},['email','role']),

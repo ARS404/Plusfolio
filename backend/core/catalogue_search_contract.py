@@ -3,6 +3,9 @@ INVITE_ROLE={'type':'string','enum':['student','teacher'],'description':'Кру�
 CIRCLE_STATE={'type':'string','enum':['all','active','archived'],'default':'all',
               'description':'Все кружки, только активные или только архивные.'}
 
+REPORT_ROLE={'type':'string','enum':['admin','teacher','analyst','student'],
+ 'description':'Для кружков и аналитики: одна из назначенных аккаунту ролей. Остальные роли не расширяют срез. Без параметра права объединяются.'}
+
 PROPERTIES={
  'kind':{'type':'string','enum':['circle','worksheet','topic'],'description':'Сущность: кружки, версии листков или темы. Для задач используйте /problem-search, field=metadata.'},
  'q':{'type':'string','minLength':1,'maxLength':160,'pattern':r'\S','description':'Название, описание, смысловая формулировка или ID. ID и UUID ищутся точно, без векторов.'},
@@ -10,6 +13,7 @@ PROPERTIES={
  'mode':{'type':'string','enum':['hybrid','text'],'default':'hybrid','description':'Текст и CPU-эмбеддинги либо только текст. До 3 символов используется текст. При сбое модели возвращаются текстовые результаты и notice.'},
  'limit':{'type':'integer','minimum':1,'maximum':100,'default':30,'description':'Первые результаты по релевантности, без общего count и страниц.'},
  'invite_role':INVITE_ROLE,
+ 'role':REPORT_ROLE,
  'state':{**CIRCLE_STATE,'description':'Для кружков: все, только активные или только архивные. Применяется до ранжирования.'},
  'city':{'type':'array','items':{'type':'string'},'description':'Точные города кружков, ИЛИ.'},
  'tag':{'type':'array','items':{'type':'integer'},'description':'ID тегов справочника circle или worksheet. Несколько тегов — ИЛИ. У тем тегов нет.'},

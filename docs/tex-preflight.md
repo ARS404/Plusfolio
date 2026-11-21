@@ -101,3 +101,95 @@ Leased-каталоги после аварии очищаются соотве�
 
 
 В локальном черновике `worksheet.numbering_start` задаёт 0 или 1 (по умолчанию 1). В API это верхнеуровневое поле `numbering_start`, в том числе у `/worksheets/preview`. У блока задачи `include_in_journal=false` исключает её только из плюсника и прогресса: в предпросмотре и PDF печатаются все задачи и решения с исходными номерами.
+
+## Локальная сборка на Windows
+
+Рекомендуемый вариант для загружающего робота — WSL 2 с Ubuntu 24.04 LTS. Python, закреплённый Tectonic и bubblewrap работают внутри Linux на компьютере загружающего. Робот получает тот же архив сервиса и вызывает существующий preview_tex.py. Локальная проверка включает каждую задачу и весь итоговый листок до соответствующего POST.
+
+Текущий сборщик использует Unix-модули fcntl/resource, символические ссылки и Linux-изоляцию bubblewrap. Для нативного tectonic.exe потребуется отдельная адаптация запуска, лимитов, блокировок, изоляции и проверок контракта. Отдельный запуск TeX с произвольным шаблоном даёт другой процесс сборки. WSL 2 переиспользует текущую реализацию.
+
+Уже настроенную Linux-VM на том же компьютере можно использовать с этим же пакетом и командами Linux. Готовый локальный контейнер может стать отдельным вариантом после проверки запуска bubblewrap и ограничений ресурсов внутри контейнера. Для первого Windows-рецепта выбран WSL 2.
+
+Рецепт сверён с исходниками сборщика и официальной документацией Microsoft/Ubuntu. Полный прогон на Windows/WSL в текущей macOS-среде остаётся этапом приёмки.
+
+## Windows — однократная подготовка WSL
+
+Робот сначала проверяет доступную среду из PowerShell.
+
+```powershell
+wsl.exe --status
+wsl.exe --list --verbose
+```
+
+Подходит дистрибутив с VERSION=2. Если WSL отсутствует, его устанавливают в рамках разрешённой настройки компьютера. Установка может требовать прав администратора Windows, перезагрузки и создания Linux-пользователя при первом запуске. Робот сохраняет исходный листок и ход согласования перед перезагрузкой. После первичной настройки он продолжает текущую задачу.
+
+```powershell
+wsl.exe --install -d Ubuntu-24.04
+```
+
+После перезагрузки и настройки Ubuntu проверьте wsl.exe --list --verbose, затем откройте Ubuntu через wsl.exe -d Ubuntu-24.04. Если подходящая WSL 2 уже установлена, переиспользуйте её после проверки Python и bubblewrap.
+
+Следующие команды выполняются в Ubuntu. Штатный Python Ubuntu 24.04 — 3.12; runner использует в том числе hashlib.file_digest, поэтому для этого рецепта применяется Python 3.12.
+
+```bash
+set -e
+sudo apt-get update
+sudo apt-get install --yes python3 python3-venv bubblewrap ca-certificates
+python3 --version
+uname -m
+bwrap --unshare-all --die-with-parent --new-session --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp /usr/bin/true
+```
+
+Поддерживаемые installer архитектуры Linux — x86_64 и aarch64. Проверка bwrap должна завершиться кодом 0 от обычного Linux-пользователя. Ошибка user namespace/AppArmor требует исправления среды и повторной проверки. В Ubuntu 24.04 действуют ограничения user namespaces; используйте штатный пакет bubblewrap и подходящий профиль AppArmor. Сам черновик затем запускается обычным пользователем через preview_tex.py.
+
+Официальные инструкции по установке и диагностике доступны у [Microsoft](https://learn.microsoft.com/en-us/windows/wsl/install), [Ubuntu](https://documentation.ubuntu.com/wsl/latest/howto/install-ubuntu-wsl2/) и в [описании ограничений user namespaces](https://documentation.ubuntu.com/security/security-features/privilege-restriction/apparmor/).
+
+## Windows — пакет и подготовка компилятора
+
+Получите JSON контракта и ZIP через API от имени загружающего. Для примеров сохраните ZIP как toolchain.zip в Downloads; подставьте действительные WINDOWS_USER, LINUX_USER и ACTUAL_CONTRACT_ID. Секрет Bearer используется только клиентом скачивания. Во входной JSON листка и report.json входят учебные данные и технические хеши.
+
+Архив, виртуальное окружение и рабочие файлы сборщика разместите в Linux-файловой системе WSL. Пример использует каталог ~/plusfolio-preflight/ACTUAL_CONTRACT_ID. Microsoft рекомендует Linux-файловую систему для Linux-инструментов; это также сохраняет ожидаемые права и работу символических ссылок. Подробности — в [руководстве по файловым системам WSL](https://learn.microsoft.com/en-us/windows/wsl/filesystems).
+
+Команды выполняются в Ubuntu. Для нового контракта создаётся новый каталог. Если пакет уже подготовлен, используйте существующий каталог после повторной проверки с его актуальным contract_id.
+
+```bash
+set -e
+mkdir -p ~/plusfolio-preflight
+cd ~/plusfolio-preflight
+mkdir ACTUAL_CONTRACT_ID
+python3 -m zipfile -e "/mnt/c/Users/WINDOWS_USER/Downloads/toolchain.zip" ACTUAL_CONTRACT_ID
+cd ACTUAL_CONTRACT_ID
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-tex.lock
+.venv/bin/python scripts/preview_tex.py --prepare --expected-contract ACTUAL_CONTRACT_ID
+```
+
+Для установки Python-зависимостей и первого скачивания закреплённого бинарного Tectonic нужен доступ к источникам зависимостей. Пакеты и шрифты TeX уже содержатся в архиве; --prepare проверяет их offline. Изменение файлов пакета приводит к ошибке проверки manifest. В этом случае получите согласованные JSON и ZIP заново и подготовьте новый каталог.
+
+## Windows — запуск проверки из PowerShell
+
+Робот, работающий в Windows, может вызывать Linux-runner напрямую через wsl.exe. В переменных используются абсолютные пути Linux. Замените имена пользователей, ID контракта и каталог очередной редакции.
+
+```powershell
+$PreviewDir = "/home/LINUX_USER/plusfolio-preflight/ACTUAL_CONTRACT_ID"
+$DraftFile = "/mnt/c/Users/WINDOWS_USER/Downloads/draft.json"
+$ReviewDir = "/home/LINUX_USER/plusfolio-reviews/task-001-v1"
+wsl.exe -d Ubuntu-24.04 --cd $PreviewDir --exec .venv/bin/python scripts/preview_tex.py --input $DraftFile --output $ReviewDir --expected-contract ACTUAL_CONTRACT_ID
+if ($LASTEXITCODE -ne 0) { throw "Локальная проверка TeX завершилась ошибкой" }
+```
+
+Каждая задача и каждая правка получают отдельный ReviewDir. После согласования задач создайте JSON полного листка с kind=worksheet, полным порядком blocks, метаданными, numbering_start и assets и запустите ту же команду с новым выходным каталогом. JSON-формат и смысл обоих PDF описаны в разделах выше.
+
+Для просмотра результата в Проводнике откройте путь \\wsl.localhost\Ubuntu-24.04\home\LINUX_USER\plusfolio-reviews\task-001-v1. Из Ubuntu тот же каталог можно открыть командой explorer.exe с путём каталога. Робот читает PDF своим инструментом просмотра; при копировании артефактов в Windows сверяет их хеши с report.json.
+
+## Windows — приёмка локальной проверки
+
+Для завершения проверки робот фиксирует точный contract_id, успешный код завершения, наличие statement.pdf, with-solutions.pdf и report.json, совпадение входного SHA-256 с согласованной редакцией и предупреждения компилятора. Затем просматривает все страницы обоих PDF, проверяет кириллицу, формулы, рамки, рисунки, переносы и нумерацию и проводит предусмотренное протоколом согласование. После изменения входных данных проверка повторяется в новом каталоге.
+
+При ошибке WSL, bubblewrap, установки компилятора или manifest робот сообщает конкретную причину и сохраняет черновик. К публикации он переходит после успешной локальной проверки. Серверный PDF может использоваться для дополнительной сверки после создания материала.
+
+При вводе Windows-пути в параметры Linux-runner используйте его отображение /mnt/c/... либо путь /home/...; пути с пробелами передаются отдельным аргументом в кавычках. Ошибка существующего выходного каталога исправляется новым именем редакции.
+
+Окружение можно переиспользовать для одного contract_id. Для нового контракта подготавливается отдельный пакет. После завершения загрузки и сохранения согласованных PDF и отчёта рабочие редакции и старые каталоги пакетов очищаются по завершённым задачам. Временные compiler jobs удаляет сам runner; текущие пакеты и артефакты незавершённой задачи сохраняются.
+
+Реальная Windows-приёмка включает установку или переиспользование WSL 2, две подготовки одного пакета с совпадающим contract_id, сборку отдельной задачи и полного листка с кириллицей, definition и TikZ, просмотр обоих PDF и проверку завершения при ошибочных manifest и TeX. Результат отмечается по фактически выполненным шагам.
